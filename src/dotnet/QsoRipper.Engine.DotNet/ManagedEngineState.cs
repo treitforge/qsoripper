@@ -101,7 +101,7 @@ internal sealed class QrzSyncUnavailableException : InvalidOperationException
     }
 }
 
-internal sealed class ManagedEngineState
+internal sealed partial class ManagedEngineState
 {
     private const string PersistenceStepDescription = "The managed .NET engine keeps its logbook in memory. No persistence input is required during setup.";
     private const string PersistenceStepDescriptionSqlite = "The managed .NET engine stores its logbook in a local SQLite database backed by shared setup.";

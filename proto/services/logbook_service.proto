@@ -6,6 +6,8 @@ option csharp_namespace = "QsoRipper.Services";
 
 import "services/delete_qso_request.proto";
 import "services/delete_qso_response.proto";
+import "services/backfill_qso_enrichment_request.proto";
+import "services/backfill_qso_enrichment_response.proto";
 import "services/export_adif_request.proto";
 import "services/export_adif_response.proto";
 import "services/get_qso_request.proto";
@@ -37,6 +39,7 @@ import "services/update_qso_response.proto";
 //   DeleteQso     — implemented for local storage; QRZ delete supported when delete_from_qrz=true
 //   GetQso        — implemented for local storage
 //   ListQsos      — implemented for local storage
+//   BackfillQsoEnrichment - implemented with QRZ XML lookup data (both engines)
 //   SyncWithQrz   — implemented (both engines)
 //   GetSyncStatus — implemented for local storage counts
 //   ImportAdif    — implemented for local ADIF migration import with duplicate/warning reporting
@@ -95,6 +98,9 @@ service LogbookService {
   // All filter fields are optional; omitting all filters returns all QSOs (subject to limit/offset).
   // Clients should consume incrementally rather than buffering the full stream.
   rpc ListQsos(ListQsosRequest) returns (stream ListQsosResponse);
+
+  // Fill missing QSO enrichment fields from QRZ XML callsign data.
+  rpc BackfillQsoEnrichment(BackfillQsoEnrichmentRequest) returns (stream BackfillQsoEnrichmentResponse);
 
   // --- QRZ Sync ---
 

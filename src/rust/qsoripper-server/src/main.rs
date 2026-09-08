@@ -15,11 +15,15 @@ use std::{
     io,
     net::SocketAddr,
     path::PathBuf,
+    pin::Pin,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use qsoripper_core::adif::{parse_adi_qsos, serialize_adi_qsos};
+use qsoripper_core::application::enrichment_backfill::{
+    run_enrichment_backfill, EnrichmentBackfillProgress,
+};
 use qsoripper_core::application::logbook::LogbookError;
 use qsoripper_core::cw::{CwController, CwError, CwKeyerConfig};
 use qsoripper_core::lookup::QRZ_USER_AGENT_ENV_VAR;
@@ -30,7 +34,10 @@ use qsoripper_core::storage::{
 use qsoripper_storage_memory::MemoryStorage;
 use qsoripper_storage_sqlite::SqliteStorageBuilder;
 use tokio::sync::Mutex;
-use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
+use tokio_stream::{
+    wrappers::{ReceiverStream, TcpListenerStream},
+    Stream, StreamExt,
+};
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
@@ -51,10 +58,11 @@ use qsoripper_core::proto::qsoripper::services::{
     space_weather_service_server::{SpaceWeatherService, SpaceWeatherServiceServer},
     station_profile_service_server::StationProfileServiceServer,
     AbortCwRequest, AbortCwResponse, AdifChunk, ApplyRuntimeConfigRequest,
-    ApplyRuntimeConfigResponse, BatchLookupRequest, BatchLookupResponse, ComputeGreatCircleRequest,
-    ComputeGreatCircleResponse, CwSendState, DeleteQsoRequest, DeleteQsoResponse,
-    DeletedRecordsFilter as ProtoDeletedRecordsFilter, EngineInfo, ExportAdifRequest,
-    ExportAdifResponse, GetActiveContestsRequest, GetActiveContestsResponse,
+    ApplyRuntimeConfigResponse, BackfillQsoEnrichmentMode, BackfillQsoEnrichmentRequest,
+    BackfillQsoEnrichmentResponse, BatchLookupRequest, BatchLookupResponse,
+    ComputeGreatCircleRequest, ComputeGreatCircleResponse, CwSendState, DeleteQsoRequest,
+    DeleteQsoResponse, DeletedRecordsFilter as ProtoDeletedRecordsFilter, EngineInfo,
+    ExportAdifRequest, ExportAdifResponse, GetActiveContestsRequest, GetActiveContestsResponse,
     GetCachedCallsignRequest, GetCachedCallsignResponse, GetCurrentSpaceWeatherRequest,
     GetCurrentSpaceWeatherResponse, GetCwKeyerStatusRequest, GetCwKeyerStatusResponse,
     GetDxccEntityRequest, GetDxccEntityResponse, GetEngineInfoRequest, GetEngineInfoResponse,
@@ -369,6 +377,7 @@ struct DeveloperLogbookService {
     sync_scheduler: Arc<sync_scheduler::SyncScheduler>,
     qrz_upload_lock: Arc<Mutex<()>>,
     lotw_upload_lock: Arc<Mutex<()>>,
+    enrichment_backfill_lock: Arc<Mutex<()>>,
 }
 
 impl DeveloperLogbookService {
@@ -383,6 +392,7 @@ impl DeveloperLogbookService {
             sync_scheduler,
             qrz_upload_lock,
             lotw_upload_lock,
+            enrichment_backfill_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -517,6 +527,8 @@ impl DeveloperLogbookService {
 #[tonic::async_trait]
 impl LogbookService for DeveloperLogbookService {
     type ListQsosStream = ReceiverStream<Result<ListQsosResponse, Status>>;
+    type BackfillQsoEnrichmentStream =
+        Pin<Box<dyn Stream<Item = Result<BackfillQsoEnrichmentResponse, Status>> + Send>>;
     type SyncWithQrzStream = ReceiverStream<Result<SyncWithQrzResponse, Status>>;
     type SyncWithLotwStream = ReceiverStream<Result<SyncWithLotwResponse, Status>>;
     type ExportAdifStream = ReceiverStream<Result<ExportAdifResponse, Status>>;
@@ -738,6 +750,65 @@ impl LogbookService for DeveloperLogbookService {
         }
 
         Ok(Response::new(ReceiverStream::new(receiver)))
+    }
+
+    async fn backfill_qso_enrichment(
+        &self,
+        request: Request<BackfillQsoEnrichmentRequest>,
+    ) -> Result<Response<Self::BackfillQsoEnrichmentStream>, Status> {
+        let request = request.into_inner();
+        let mode = BackfillQsoEnrichmentMode::try_from(request.mode)
+            .map_err(|_| Status::invalid_argument("Invalid backfill mode."))?;
+        if !is_valid_backfill_timestamp(request.after.as_ref()) {
+            return Err(Status::invalid_argument(
+                "Backfill after must be a valid protobuf Timestamp.",
+            ));
+        }
+        if !is_valid_backfill_timestamp(request.before.as_ref()) {
+            return Err(Status::invalid_argument(
+                "Backfill before must be a valid protobuf Timestamp.",
+            ));
+        }
+        if matches!(
+            (&request.after, &request.before),
+            (Some(after), Some(before))
+                if (after.seconds, after.nanos) > (before.seconds, before.nanos)
+        ) {
+            return Err(Status::invalid_argument(
+                "Backfill after must not be later than before.",
+            ));
+        }
+        let guard = self
+            .enrichment_backfill_lock
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| Status::resource_exhausted("A QSO enrichment backfill is active."))?;
+        let apply = mode == BackfillQsoEnrichmentMode::Apply;
+        let query = QsoListQuery {
+            after: request.after,
+            before: request.before,
+            sort: QsoSortOrder::OldestFirst,
+            deleted_filter: DeletedRecordsFilter::ActiveOnly,
+            ..QsoListQuery::default()
+        };
+        let (engine, coordinator) = self.runtime_config.enrichment_backfill_context().await;
+        let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(8);
+
+        tokio::spawn(async move {
+            let _guard = guard;
+            run_enrichment_backfill(
+                engine.logbook_store(),
+                &coordinator,
+                &query,
+                apply,
+                &progress_tx,
+            )
+            .await;
+        });
+        let stream =
+            ReceiverStream::new(progress_rx).map(|progress| Ok(backfill_response(progress)));
+
+        Ok(Response::new(Box::pin(stream)))
     }
 
     async fn sync_with_qrz(
@@ -1853,6 +1924,37 @@ fn qso_list_query_from_request(request: &ListQsosRequest) -> Result<QsoListQuery
     })
 }
 
+fn is_valid_backfill_timestamp(timestamp: Option<&Timestamp>) -> bool {
+    const MIN_SECONDS: i64 = -62_135_596_800;
+    const MAX_SECONDS: i64 = 253_402_300_799;
+
+    if let Some(timestamp) = timestamp {
+        if !(MIN_SECONDS..=MAX_SECONDS).contains(&timestamp.seconds)
+            || !(0..1_000_000_000).contains(&timestamp.nanos)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn backfill_response(progress: EnrichmentBackfillProgress) -> BackfillQsoEnrichmentResponse {
+    BackfillQsoEnrichmentResponse {
+        scanned: progress.scanned,
+        candidates: progress.candidates,
+        unique_callsigns: progress.unique_callsigns,
+        found: progress.found,
+        not_found: progress.not_found,
+        errors: progress.errors,
+        changed: progress.changed,
+        unchanged: progress.unchanged,
+        concurrent_edits: progress.concurrent_edits,
+        storage_errors: progress.storage_errors,
+        complete: progress.complete,
+        current_callsign: progress.current_callsign,
+    }
+}
+
 const ADIF_CHUNK_SIZE: usize = 16 * 1024;
 
 fn export_qso_list_query_from_request(request: &ExportAdifRequest) -> QsoListQuery {
@@ -1912,12 +2014,12 @@ mod tests {
         logbook_service_server::{LogbookService, LogbookServiceServer},
         lookup_service_server::LookupService,
         space_weather_service_server::SpaceWeatherService,
-        AdifChunk, BatchLookupRequest, ComputeGreatCircleRequest, DeleteQsoRequest,
-        ExportAdifRequest, GetCachedCallsignRequest, GetCurrentSpaceWeatherRequest,
-        GetDxccEntityRequest, GetQsoRequest, GetSyncStatusRequest, ImportAdifRequest,
-        ImportAdifResponse, ListQsosRequest, LogQsoRequest, LookupRequest, QsoSortOrder,
-        RefreshSpaceWeatherRequest, RestoreQsoRequest, StreamLookupRequest, SyncWithLotwRequest,
-        UpdateQsoRequest,
+        AdifChunk, BackfillQsoEnrichmentRequest, BatchLookupRequest, ComputeGreatCircleRequest,
+        DeleteQsoRequest, ExportAdifRequest, GetCachedCallsignRequest,
+        GetCurrentSpaceWeatherRequest, GetDxccEntityRequest, GetQsoRequest, GetSyncStatusRequest,
+        ImportAdifRequest, ImportAdifResponse, ListQsosRequest, LogQsoRequest, LookupRequest,
+        QsoSortOrder, RefreshSpaceWeatherRequest, RestoreQsoRequest, StreamLookupRequest,
+        SyncWithLotwRequest, UpdateQsoRequest,
     };
     use tokio_stream::StreamExt;
     use tonic::transport::Channel;
@@ -2003,6 +2105,78 @@ mod tests {
 
     fn test_runtime_config() -> Arc<RuntimeConfigManager> {
         Arc::new(RuntimeConfigManager::new(BTreeMap::new()).expect("runtime config"))
+    }
+
+    #[tokio::test]
+    async fn second_enrichment_backfill_returns_resource_exhausted() {
+        let service = test_logbook_service(test_runtime_config());
+        let _guard = service.enrichment_backfill_lock.lock().await;
+
+        let error = LogbookService::backfill_qso_enrichment(
+            &service,
+            Request::new(BackfillQsoEnrichmentRequest::default()),
+        )
+        .await
+        .err()
+        .expect("second backfill must fail");
+
+        assert_eq!(error.code(), Code::ResourceExhausted);
+    }
+
+    #[tokio::test]
+    async fn enrichment_backfill_rejects_invalid_timestamp_components() {
+        let service = test_logbook_service(test_runtime_config());
+        for timestamp in [
+            Timestamp {
+                seconds: 0,
+                nanos: -1,
+            },
+            Timestamp {
+                seconds: 0,
+                nanos: 1_000_000_000,
+            },
+            Timestamp {
+                seconds: 253_402_300_800,
+                nanos: 0,
+            },
+        ] {
+            let error = LogbookService::backfill_qso_enrichment(
+                &service,
+                Request::new(BackfillQsoEnrichmentRequest {
+                    after: Some(timestamp),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .err()
+            .expect("invalid timestamp must fail");
+
+            assert_eq!(error.code(), Code::InvalidArgument);
+        }
+    }
+
+    #[tokio::test]
+    async fn enrichment_backfill_rejects_reversed_timestamp_range() {
+        let service = test_logbook_service(test_runtime_config());
+        let error = LogbookService::backfill_qso_enrichment(
+            &service,
+            Request::new(BackfillQsoEnrichmentRequest {
+                after: Some(Timestamp {
+                    seconds: 10,
+                    nanos: 1,
+                }),
+                before: Some(Timestamp {
+                    seconds: 10,
+                    nanos: 0,
+                }),
+                ..Default::default()
+            }),
+        )
+        .await
+        .err()
+        .expect("reversed range must fail");
+
+        assert_eq!(error.code(), Code::InvalidArgument);
     }
 
     fn test_runtime_config_with_logbook(

@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package qsoripper.services;
+
+option csharp_namespace = "QsoRipper.Services";
+
+// Reports cumulative callsign enrichment backfill progress.
+message BackfillQsoEnrichmentResponse {
+  uint32 scanned = 1;
+  uint32 candidates = 2;
+  uint32 unique_callsigns = 3;
+  uint32 found = 4;
+  uint32 not_found = 5;
+  uint32 errors = 6;
+  uint32 changed = 7;
+  uint32 unchanged = 8;
+  uint32 concurrent_edits = 9;
+  uint32 storage_errors = 10;
+  bool complete = 11;
+  optional string current_callsign = 12;
+}

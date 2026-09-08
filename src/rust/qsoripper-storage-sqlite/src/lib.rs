@@ -616,48 +616,38 @@ fn update_qso_record_if_unchanged(
     expected: &QsoRecord,
     replacement: &QsoRecord,
 ) -> Result<bool, StorageError> {
-    let encoded = encode_message(replacement);
-    let expected_encoded = encode_message(expected);
-    let rows = execute_statement(
-        connection,
-        "UPDATE qsos
-         SET qrz_logid = ?,
-             qrz_bookid = ?,
-             station_callsign = ?,
-             worked_callsign = ?,
-             utc_timestamp_ms = ?,
-             band = ?,
-             mode = ?,
-             contest_id = ?,
-             created_at_ms = ?,
-             updated_at_ms = ?,
-             sync_status = ?,
-             record = ?,
-             deleted_at_ms = ?,
-             pending_remote_delete = ?
-         WHERE local_id = ? AND record = ?",
-        &[
-            Value::from(replacement.qrz_logid.as_deref()),
-            Value::from(replacement.qrz_bookid.as_deref()),
-            Value::from(replacement.station_callsign.as_str()),
-            Value::from(replacement.worked_callsign.as_str()),
-            Value::from(timestamp_to_millis(replacement.utc_timestamp.as_ref())),
-            Value::Integer(i64::from(replacement.band)),
-            Value::Integer(i64::from(replacement.mode)),
-            Value::from(replacement.contest_id.as_deref()),
-            Value::from(timestamp_to_millis(replacement.created_at.as_ref())),
-            Value::from(timestamp_to_millis(replacement.updated_at.as_ref())),
-            Value::Integer(i64::from(replacement.sync_status)),
-            Value::Binary(encoded),
-            Value::from(timestamp_to_millis(replacement.deleted_at.as_ref())),
-            Value::Integer(i64::from(replacement.pending_remote_delete)),
-            Value::from(replacement.local_id.as_str()),
-            Value::Binary(expected_encoded),
-        ],
-    )
-    .map_err(map_sqlite_error)?;
+    execute_statement(connection, "BEGIN IMMEDIATE", &[]).map_err(map_sqlite_error)?;
+    let result = (|| {
+        let payload = query_optional::<Vec<u8>>(
+            connection,
+            "SELECT record FROM qsos WHERE local_id = ?",
+            &[Value::from(expected.local_id.as_str())],
+            0,
+        )
+        .map_err(map_sqlite_error)?;
+        let Some(payload) = payload else {
+            return Ok(false);
+        };
+        if decode_qso(&payload)? != *expected {
+            return Ok(false);
+        }
 
-    Ok(rows > 0)
+        update_qso_record(connection, replacement)
+    })();
+
+    match result {
+        Ok(updated) => match execute_statement(connection, "COMMIT", &[]) {
+            Ok(_) => Ok(updated),
+            Err(error) => {
+                let _ = execute_statement(connection, "ROLLBACK", &[]);
+                Err(map_sqlite_error(error))
+            }
+        },
+        Err(error) => {
+            let _ = execute_statement(connection, "ROLLBACK", &[]);
+            Err(error)
+        }
+    }
 }
 
 fn encode_message<T: Message>(message: &T) -> Vec<u8> {
@@ -748,7 +738,7 @@ fn millis_to_timestamp(millis: Option<i64>) -> Option<prost_types::Timestamp> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
 mod tests {
-    use super::SqliteStorageBuilder;
+    use super::{encode_message, SqliteStorageBuilder};
     use prost_types::Timestamp;
     use qsoripper_core::application::logbook::LogbookEngine;
     use qsoripper_core::domain::qso::QsoRecordBuilder;
@@ -833,7 +823,7 @@ mod tests {
     #[tokio::test]
     async fn sqlite_storage_conditional_update_rejects_stale_snapshot() {
         let storage = SqliteStorageBuilder::new().in_memory().build().unwrap();
-        let original = QsoRecordBuilder::new("W1AW", "K7CAS")
+        let mut original = QsoRecordBuilder::new("W1AW", "K7CAS")
             .band(Band::Band20m)
             .mode(Mode::Ft8)
             .timestamp(Timestamp {
@@ -841,6 +831,9 @@ mod tests {
                 nanos: 0,
             })
             .build();
+        original.extra_fields.insert("APP_A".into(), "one".into());
+        original.extra_fields.insert("APP_B".into(), "two".into());
+        original.extra_fields.insert("APP_C".into(), "three".into());
         let logbook = storage.logbook();
         logbook.insert_qso(&original).await.unwrap();
         let mut current = original.clone();
@@ -855,6 +848,55 @@ mod tests {
             .unwrap());
         let saved = logbook.get_qso(&original.local_id).await.unwrap().unwrap();
         assert_eq!(saved.notes.as_deref(), Some("operator edit"));
+    }
+
+    #[tokio::test]
+    async fn sqlite_storage_conditional_update_compares_map_fields_semantically() {
+        let storage = SqliteStorageBuilder::new().in_memory().build().unwrap();
+        let mut persisted = QsoRecordBuilder::new("W1AW", "K7MAP")
+            .band(Band::Band20m)
+            .mode(Mode::Ft8)
+            .timestamp(Timestamp {
+                seconds: 1_700_000_000,
+                nanos: 0,
+            })
+            .build();
+        for index in 0..16 {
+            persisted
+                .extra_fields
+                .insert(format!("APP_FIELD_{index}"), format!("value-{index}"));
+        }
+        let logbook = storage.logbook();
+        logbook.insert_qso(&persisted).await.unwrap();
+
+        let mut expected = persisted.clone();
+        for _ in 0..100 {
+            expected.extra_fields = persisted
+                .extra_fields
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            if encode_message(&expected) != encode_message(&persisted) {
+                break;
+            }
+        }
+        assert_eq!(expected, persisted);
+        assert_ne!(
+            encode_message(&expected),
+            encode_message(&persisted),
+            "test requires different protobuf map encodings"
+        );
+
+        let mut replacement = expected.clone();
+        replacement.worked_grid = Some("FN31".into());
+        assert!(logbook
+            .update_qso_if_unchanged(&expected, &replacement)
+            .await
+            .unwrap());
+
+        let saved = logbook.get_qso(&persisted.local_id).await.unwrap().unwrap();
+        assert_eq!(saved.worked_grid.as_deref(), Some("FN31"));
+        assert_eq!(saved.extra_fields, persisted.extra_fields);
     }
 
     #[tokio::test]

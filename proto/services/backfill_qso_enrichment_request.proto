@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package qsoripper.services;
+
+option csharp_namespace = "QsoRipper.Services";
+
+import "google/protobuf/timestamp.proto";
+import "services/backfill_qso_enrichment_mode.proto";
+
+// Selects active QSO records for callsign enrichment backfill.
+message BackfillQsoEnrichmentRequest {
+  // Unspecified mode uses preview behavior.
+  BackfillQsoEnrichmentMode mode = 1;
+  // Include QSOs at or after this UTC time.
+  optional google.protobuf.Timestamp after = 2;
+  // Include QSOs at or before this UTC time.
+  optional google.protobuf.Timestamp before = 3;
+}

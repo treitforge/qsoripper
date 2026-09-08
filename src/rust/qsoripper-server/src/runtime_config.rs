@@ -216,6 +216,16 @@ impl RuntimeConfigManager {
         self.bindings.read().await.lookup_coordinator.clone()
     }
 
+    pub(crate) async fn enrichment_backfill_context(
+        &self,
+    ) -> (LogbookEngine, Arc<LookupCoordinator>) {
+        let bindings = self.bindings.read().await;
+        (
+            bindings.logbook_engine.clone(),
+            bindings.lookup_coordinator.clone(),
+        )
+    }
+
     pub(crate) async fn contest_calendar_monitor(&self) -> Arc<ContestCalendarMonitor> {
         self.bindings.read().await.contest_calendar_monitor.clone()
     }

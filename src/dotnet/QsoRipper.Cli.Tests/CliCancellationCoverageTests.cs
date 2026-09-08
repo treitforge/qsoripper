@@ -10,6 +10,7 @@ public sealed class CliCancellationCoverageTests
     [InlineData(typeof(ImportAdifCommand))]
     [InlineData(typeof(ExportAdifCommand))]
     [InlineData(typeof(ListQsosCommand))]
+    [InlineData(typeof(EnrichCommand))]
     [InlineData(typeof(SyncCommand))]
     [InlineData(typeof(StreamLookupCommand))]
     public void RunAsync_methods_accept_cancellation_token(Type commandType)

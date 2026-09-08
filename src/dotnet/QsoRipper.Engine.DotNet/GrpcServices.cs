@@ -5,6 +5,7 @@ using QsoRipper.Domain;
 using QsoRipper.Engine.DotNet.Lotw;
 using QsoRipper.Engine.Lookup;
 using QsoRipper.Services;
+using Timestamp = Google.Protobuf.WellKnownTypes.Timestamp;
 
 namespace QsoRipper.Engine.DotNet;
 
@@ -404,6 +405,70 @@ internal sealed class ManagedLogbookGrpcService(ManagedEngineState state)
         foreach (var qso in qsos)
         {
             await responseStream.WriteAsync(new ListQsosResponse { Qso = qso });
+        }
+    }
+
+    public override async Task BackfillQsoEnrichment(
+        BackfillQsoEnrichmentRequest request,
+        IServerStreamWriter<BackfillQsoEnrichmentResponse> responseStream,
+        ServerCallContext context)
+    {
+        ValidateEnrichmentBackfillRequest(request);
+        if (!state.TryBeginEnrichmentBackfill(out var lease))
+        {
+            throw new RpcException(new Status(
+                StatusCode.ResourceExhausted,
+                "A QSO enrichment backfill is active."));
+        }
+
+        using (lease)
+        {
+            await foreach (var progress in state
+                .RunEnrichmentBackfillAsync(request, context.CancellationToken)
+                .ConfigureAwait(false))
+            {
+                await responseStream.WriteAsync(progress, context.CancellationToken);
+            }
+        }
+    }
+
+    internal static void ValidateEnrichmentBackfillRequest(BackfillQsoEnrichmentRequest request)
+    {
+        if (!System.Enum.IsDefined(request.Mode))
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid backfill mode."));
+        }
+        try
+        {
+            ValidateTimestamp(request.After, "after");
+            ValidateTimestamp(request.Before, "before");
+            _ = request.After?.ToDateTimeOffset();
+            _ = request.Before?.ToDateTimeOffset();
+            if (request.After is not null
+                && request.Before is not null
+                && (request.After.Seconds > request.Before.Seconds
+                    || (request.After.Seconds == request.Before.Seconds
+                        && request.After.Nanos > request.Before.Nanos)))
+            {
+                throw new RpcException(new Status(
+                    StatusCode.InvalidArgument,
+                    "Backfill after must not be later than before."));
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+        {
+            throw new RpcException(new Status(StatusCode.InvalidArgument, ex.Message));
+        }
+    }
+
+    private static void ValidateTimestamp(Timestamp? timestamp, string name)
+    {
+        if (timestamp is not null
+            && (timestamp.Seconds is < -62_135_596_800 or > 253_402_300_799
+                || timestamp.Nanos is < 0 or > 999_999_999))
+        {
+            throw new InvalidOperationException(
+                $"Backfill {name} must be a valid protobuf Timestamp.");
         }
     }
 

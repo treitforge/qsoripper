@@ -305,6 +305,37 @@ public sealed class LookupCoordinatorTests
     }
 
     [Fact]
+    public async Task Lookup_CancellationOnlyCancelsThatWaiter()
+    {
+        var provider = new BlockingProvider();
+        var coordinator = new LookupCoordinator(provider);
+        using var cancellation = new CancellationTokenSource();
+
+        var first = coordinator.LookupAsync("W1AW", skipCache: true, cancellation.Token);
+        var second = coordinator.LookupAsync("W1AW", skipCache: true);
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+        provider.Complete(FoundResult("W1AW"));
+        var result = await second;
+
+        Assert.Equal(LookupState.Found, result.State);
+    }
+
+    [Fact]
+    public async Task Lookup_SharedProviderWorkHasAnIndependentTimeout()
+    {
+        var coordinator = new LookupCoordinator(
+            new BlockingProvider(),
+            providerTimeout: TimeSpan.FromMilliseconds(20));
+
+        var result = await coordinator.LookupAsync("W1AW", skipCache: true);
+
+        Assert.Equal(LookupState.Error, result.State);
+        Assert.Contains("timed out", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Lookup_ProviderError_ReturnsErrorState()
     {
         var provider = new FakeProvider();

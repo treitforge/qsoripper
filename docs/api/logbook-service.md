@@ -1,6 +1,7 @@
 # LogbookService Reference
 
-The `LogbookService` is the core QSO lifecycle interface. It covers local QSO CRUD and ADIF import/export today, with QRZ sync reserved for a later slice.
+The `LogbookService` is the core QSO lifecycle interface.
+It covers local QSO storage, callsign enrichment, external sync, and ADIF transfer.
 
 Proto definition: [`proto/services/logbook_service.proto`](../../proto/services/logbook_service.proto)
 
@@ -17,6 +18,7 @@ Service envelopes and support types live in their own files under `proto/service
 | `DeleteQso` | Implemented | Deletes from local storage. QRZ delete still reports unimplemented when requested |
 | `GetQso` | Implemented | Loads a single local QSO by `local_id` |
 | `ListQsos` | Implemented | Streams locally stored QSOs with filters, sorting, limit, and offset |
+| `BackfillQsoEnrichment` | Implemented | Fills missing QSO enrichment fields through QRZ XML callsign lookup |
 | `SyncWithQrz` | Planned | Contract defined. Returns `UNIMPLEMENTED` |
 | `GetSyncStatus` | Implemented | Returns live local counts from storage. QRZ fields remain zero or absent until the engine implements sync. |
 | `ImportAdif` | Implemented | Streams ADIF in, imports after client close, reports duplicates/fallback warnings |
@@ -193,6 +195,44 @@ rpc ListQsos(ListQsosRequest) returns (stream ListQsosResponse)
 
 **Notable status codes:**
 - `OK` - zero or more `ListQsosResponse` envelopes streamed back.
+
+---
+
+### BackfillQsoEnrichment
+
+Fill missing enrichment fields on active local QSOs.
+
+```
+rpc BackfillQsoEnrichment(BackfillQsoEnrichmentRequest) returns (stream BackfillQsoEnrichmentResponse)
+```
+
+Preview mode is the default.
+Apply mode uses atomic semantic compare-and-update writes; protobuf map wire order
+does not affect concurrent-edit detection.
+The engine keeps concurrent operator changes.
+The engine does not change QRZ Logbook fields or sync state.
+
+The request supports optional inclusive `after` and `before` UTC filters.
+Both values must be valid protobuf timestamps, and `after` must not be later than
+`before`; violations return `INVALID_ARGUMENT`.
+The response contains cumulative scan, lookup, change, conflict, and storage counts.
+The final response has `complete=true`.
+Cancellation stops new work but waits for an active, independently bounded shared
+provider lookup before releasing the one-run lease.
+The CLI returns failure for a stream without a terminal complete response or for a
+summary with lookup/storage errors; not-found records are normal success results.
+
+The CLI command is:
+
+```powershell
+qsoripper-cli enrich --preview
+qsoripper-cli enrich --apply --after 2026-08-01T00:00:00Z
+```
+
+**Notable status codes:**
+
+- `RESOURCE_EXHAUSTED` - another backfill is active.
+- `INVALID_ARGUMENT` - the mode or time range is invalid.
 
 ---
 

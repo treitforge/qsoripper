@@ -13,6 +13,7 @@ internal static class CliHelpText
               log <call> <band> <mode>         Log a QSO (e.g., log W1AW 20m FT8)
               get <local-id>                   Get a QSO by ID
               list [filters]                   List QSOs (--callsign, --band, --mode, --limit)
+              enrich [--preview | --apply]     Backfill missing QSO data from QRZ XML
               update <local-id> [fields]       Update a QSO (--grid, --freq, --enrich, etc.)
               delete <local-id>                Soft-delete a QSO (recoverable via restore)
               restore <local-id>               Restore a soft-deleted QSO
@@ -125,6 +126,22 @@ internal static class CliHelpText
                   update abc123 --grid CN87 --freq 14074
                   update abc123 --at "2026-04-12T01:51:00Z"
                   update abc123 --enrich
+                """,
+            "enrich" => """
+                Usage: enrich [--preview | --apply] [options]
+
+                Fill missing QSO enrichment fields from QRZ XML callsign data.
+                Preview is the default. Existing local values are not changed or cleared.
+
+                  --preview            Show the changes without storing them
+                  --apply              Store the missing enrichment values
+                  --after <utc>        Include QSOs at or after an ISO 8601 UTC time
+                  --before <utc>       Include QSOs at or before an ISO 8601 UTC time
+
+                Examples:
+                  enrich
+                  enrich --apply
+                  enrich --preview --after 2026-08-01T00:00:00Z
                 """,
             "delete" => """
                 Usage: delete <local-id>

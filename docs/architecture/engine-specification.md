@@ -144,6 +144,7 @@ The primary QSO CRUD and sync surface. This is the most critical service in the 
 | `PurgeDeletedQsos` | `PurgeDeletedQsosRequest` | `PurgeDeletedQsosResponse` | Unary |
 | `GetQso` | `GetQsoRequest` | `GetQsoResponse` | Unary |
 | `ListQsos` | `ListQsosRequest` | `stream ListQsosResponse` | Server-streaming |
+| `BackfillQsoEnrichment` | `BackfillQsoEnrichmentRequest` | `stream BackfillQsoEnrichmentResponse` | Server-streaming |
 | `SyncWithQrz` | `SyncWithQrzRequest` | `stream SyncWithQrzResponse` | Server-streaming |
 | `SyncWithLotw` | `SyncWithLotwRequest` | `stream SyncWithLotwResponse` | Server-streaming |
 | `GetSyncStatus` | `GetSyncStatusRequest` | `GetSyncStatusResponse` | Unary |
@@ -280,6 +281,67 @@ Streams QSO records matching optional filter criteria.
 
 **Error semantics:**
 - `INVALID_ARGUMENT` - malformed filter values.
+
+#### BackfillQsoEnrichment
+
+Fills missing QSO fields with QRZ XML callsign data.
+
+**Behavior:**
+
+1. Select active QSO rows by `local_id`.
+2. Apply the optional inclusive `after` and `before` UTC filters.
+3. Exclude soft-deleted rows.
+4. Normalize each exact callsign with the lookup coordinator rules.
+5. Keep slash callsigns as separate keys.
+6. Perform one lookup for each unique key through `LookupCoordinator`.
+7. Process lookups with conservative bounded concurrency.
+8. Fill only fields that are absent, empty, or whitespace-only.
+9. Keep each existing nonblank field unchanged.
+10. In preview mode, count changes without storage writes.
+11. In apply mode, use an atomic semantic compare-and-update operation. Protobuf
+    wire bytes are not a valid comparison key because map entry order is not stable.
+12. If the row changed after the scan, skip the write and count a concurrent edit.
+
+The operation supports these QSO fields:
+
+- `worked_operator_name`
+- `worked_grid`
+- `worked_country`
+- `worked_dxcc`
+- `worked_state`
+- `worked_county`
+- `worked_cq_zone`
+- `worked_itu_zone`
+- `worked_continent`
+- `worked_latitude`
+- `worked_longitude`
+
+The operation does not create QSO rows.
+It does not call the QRZ Logbook API.
+It does not change `qrz_logid` or `sync_status`.
+Repeated apply operations are idempotent.
+
+`BACKFILL_QSO_ENRICHMENT_MODE_UNSPECIFIED` uses preview behavior.
+Only one backfill can run in one engine process.
+A second request returns `RESOURCE_EXHAUSTED`.
+Client cancellation stops new lookup and write work.
+If a provider lookup is already active, the backfill waits for that independently
+bounded shared operation to finish before releasing its one-run lease.
+Each lookup waiter can cancel its own wait without cancelling shared provider work
+for other callers.
+
+`after` and `before` must be valid protobuf timestamps: seconds must be in
+`[-62135596800, 253402300799]` and nanos must be in `[0, 999999999]`.
+The engine returns `INVALID_ARGUMENT` for invalid timestamps or when `after` is
+later than `before`.
+
+The response values are cumulative.
+`candidates` counts active rows with missing target fields and a nonblank worked callsign.
+`found`, `not_found`, and `errors` count unique callsigns.
+`changed`, `unchanged`, `concurrent_edits`, and `storage_errors` count QSO rows.
+The server sends a terminal response with `complete=true`.
+CLI clients treat a stream without that terminal response, or a completed summary
+with lookup or storage errors, as failure. Not-found lookups remain successful.
 
 #### SyncWithQrz
 

@@ -648,6 +648,8 @@ Run it directly from source with:
 cd src/dotnet
 dotnet run --project QsoRipper.Cli -- status
 dotnet run --project QsoRipper.Cli -- --endpoint http://localhost:50051 status
+dotnet run --project QsoRipper.Cli -- enrich --preview
+dotnet run --project QsoRipper.Cli -- enrich --apply --after 2026-08-01T00:00:00Z
 ```
 
 Or publish the Native AOT build and run the produced executable:
@@ -658,7 +660,7 @@ Or publish the Native AOT build and run the produced executable:
 ```
 
 The CLI generates client stubs from the shared proto contracts during the build.
-It includes commands for status, lookup, and local gRPC logbook operations.
+It includes commands for status, lookup, local logbook operations, and QSO enrichment backfill.
 
 ## Documentation
 

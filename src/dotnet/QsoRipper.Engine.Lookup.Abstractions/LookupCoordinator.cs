@@ -19,9 +19,11 @@ public sealed class LookupCoordinator : ILookupCoordinator
     private readonly ILogbookStore? _logbookStore;
     private readonly TimeSpan _positiveTtl;
     private readonly TimeSpan _negativeTtl;
+    private readonly TimeSpan _providerTimeout;
 
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, Task<ProviderLookupResult>> _inFlight = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Lazy<Task<ProviderLookupResult>>> _inFlight =
+        new(StringComparer.Ordinal);
 
     /// <summary>Create a coordinator with configurable TTLs and optional snapshot persistence.</summary>
     public LookupCoordinator(
@@ -29,19 +31,27 @@ public sealed class LookupCoordinator : ILookupCoordinator
         ILookupSnapshotStore? snapshotStore = null,
         TimeSpan? positiveTtl = null,
         TimeSpan? negativeTtl = null,
-        ILogbookStore? logbookStore = null)
+        ILogbookStore? logbookStore = null,
+        TimeSpan? providerTimeout = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _snapshotStore = snapshotStore;
         _logbookStore = logbookStore;
         _positiveTtl = positiveTtl ?? TimeSpan.FromMinutes(15);
         _negativeTtl = negativeTtl ?? TimeSpan.FromMinutes(2);
+        _providerTimeout = providerTimeout ?? TimeSpan.FromSeconds(30);
+        if (_providerTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(providerTimeout),
+                "Provider timeout must be greater than zero.");
+        }
     }
 
     /// <inheritdoc/>
     public async Task<LookupResult> LookupAsync(string callsign, bool skipCache = false, CancellationToken ct = default)
     {
-        var normalized = NormalizeCallsign(callsign);
+        var normalized = CallsignNormalizer.Normalize(callsign);
 
         if (!skipCache)
         {
@@ -59,6 +69,7 @@ public sealed class LookupCoordinator : ILookupCoordinator
 
         var sw = Stopwatch.StartNew();
         var providerResult = await RunProviderLookupWithFallback(normalized, baseCallsign, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
         var latencyMs = (uint)Math.Min(sw.ElapsedMilliseconds, uint.MaxValue);
 
         var result = await ProviderResultToLookup(providerResult, normalized, latencyMs, ct).ConfigureAwait(false);
@@ -69,7 +80,7 @@ public sealed class LookupCoordinator : ILookupCoordinator
     /// <inheritdoc/>
     public async Task<LookupResult> GetCachedAsync(string callsign)
     {
-        var normalized = NormalizeCallsign(callsign);
+        var normalized = CallsignNormalizer.Normalize(callsign);
         var cached = GetFreshCacheEntry(normalized);
         LookupResult result;
         if (cached is not null)
@@ -109,7 +120,7 @@ public sealed class LookupCoordinator : ILookupCoordinator
         bool skipCache = false,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var normalized = NormalizeCallsign(callsign);
+        var normalized = CallsignNormalizer.Normalize(callsign);
         yield return new LookupResult
         {
             State = LookupState.Loading,
@@ -142,6 +153,7 @@ public sealed class LookupCoordinator : ILookupCoordinator
 
         var sw = Stopwatch.StartNew();
         var providerResult = await RunProviderLookupWithFallback(normalized, baseCallsign, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
         var latencyMs = (uint)Math.Min(sw.ElapsedMilliseconds, uint.MaxValue);
 
         var finalResult = await ProviderResultToLookup(providerResult, normalized, latencyMs, ct).ConfigureAwait(false);
@@ -166,21 +178,53 @@ public sealed class LookupCoordinator : ILookupCoordinator
 
     private async Task<ProviderLookupResult> RunProviderLookupDeduped(string normalizedCallsign, CancellationToken ct)
     {
-        // Use GetOrAdd to ensure only one in-flight request per callsign.
-        // The first caller creates the task; subsequent callers await the same task.
-        var task = _inFlight.GetOrAdd(normalizedCallsign, key =>
-            Task.Run(() => _provider.LookupAsync(key, ct), CancellationToken.None));
+        // Provider work has its own lifetime and timeout. Each caller only
+        // cancels its wait, so one waiter cannot cancel another waiter.
+        var shared = _inFlight.GetOrAdd(
+            normalizedCallsign,
+            key => new Lazy<Task<ProviderLookupResult>>(
+                () => RunBoundedProviderLookupAsync(key),
+                LazyThreadSafetyMode.ExecutionAndPublication));
+        var task = shared.Value;
+        ScheduleRemovalOnCompletion(normalizedCallsign, shared, task);
 
+        return await task.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task<ProviderLookupResult> RunBoundedProviderLookupAsync(string normalizedCallsign)
+    {
+        using var timeout = new CancellationTokenSource(_providerTimeout);
         try
         {
-            return await task.ConfigureAwait(false);
+            return await _provider.LookupAsync(normalizedCallsign, timeout.Token).ConfigureAwait(false);
         }
-        finally
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
-            // Remove the in-flight entry once the task completes.
-            // Only remove if the stored task is still our task (avoid removing a newer one).
-            _inFlight.TryRemove(new KeyValuePair<string, Task<ProviderLookupResult>>(normalizedCallsign, task));
+            return new ProviderLookupResult
+            {
+                State = ProviderLookupState.NetworkError,
+                ErrorMessage = $"Provider lookup timed out after {_providerTimeout.TotalSeconds:g} seconds.",
+            };
         }
+    }
+
+    private void ScheduleRemovalOnCompletion(
+        string normalizedCallsign,
+        Lazy<Task<ProviderLookupResult>> shared,
+        Task<ProviderLookupResult> task)
+    {
+        _ = task.ContinueWith(
+            completed =>
+            {
+                _ = completed.Exception;
+                _inFlight.TryRemove(
+                    new KeyValuePair<string, Lazy<Task<ProviderLookupResult>>>(
+                        normalizedCallsign,
+                        shared));
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     private async Task<LookupResult> ProviderResultToLookup(
@@ -294,12 +338,6 @@ public sealed class LookupCoordinator : ILookupCoordinator
         };
 
         await _snapshotStore.UpsertAsync(snapshot).ConfigureAwait(false);
-    }
-
-    internal static string NormalizeCallsign(string callsign)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(callsign);
-        return callsign.Trim().ToUpperInvariant();
     }
 
     private async Task PopulateHistoryAsync(LookupResult result, string normalizedCallsign)

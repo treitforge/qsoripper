@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package qsoripper.services;
+
+option csharp_namespace = "QsoRipper.Services";
+
+// Controls whether enrichment changes are simulated or stored.
+enum BackfillQsoEnrichmentMode {
+  BACKFILL_QSO_ENRICHMENT_MODE_UNSPECIFIED = 0;
+  BACKFILL_QSO_ENRICHMENT_MODE_PREVIEW = 1;
+  BACKFILL_QSO_ENRICHMENT_MODE_APPLY = 2;
+}

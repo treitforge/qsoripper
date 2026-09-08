@@ -56,6 +56,7 @@ try
             "log" => await LogQsoCommand.RunAsync(channel, arguments.Callsign!, arguments.RemainingArgs),
             "get" => await GetQsoCommand.RunAsync(channel, arguments.Callsign!, arguments.JsonOutput),
             "list" => await ListQsosCommand.RunAsync(channel, arguments.RemainingArgs, arguments.JsonOutput, cancellationSource.Token),
+            "enrich" => await EnrichCommand.RunAsync(channel, arguments.RemainingArgs, arguments.JsonOutput, cancellationSource.Token),
             "update" => await UpdateQsoCommand.RunAsync(channel, arguments.Callsign!, arguments.RemainingArgs),
             "delete" => await DeleteQsoCommand.RunAsync(channel, arguments.Callsign!),
             "restore" => await RestoreQsoCommand.RunAsync(channel, arguments.Callsign!),

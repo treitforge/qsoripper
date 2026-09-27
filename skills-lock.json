@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "collatz-step": {
+      "source": "rtreit/voss-emoji-skill-fixture",
+      "ref": "release",
+      "sourceType": "github",
+      "skillPath": "skills/collatz-step/SKILL.md",
+      "computedHash": "5c8eb5c8aa5dfe2f0684ee73d00fa21417a334376bd57413c47c096693a0d3a6"
+    }
+  }
+}

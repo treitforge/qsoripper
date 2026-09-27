@@ -59,7 +59,7 @@ pub(crate) fn wait_for_runtime_info(
     bail!("CatHub did not publish ready endpoints: {detail}")
 }
 
-/// Read a manifest only when its publishing process still exists.
+/// Read a manifest only when its publishing `CatHub` process still exists.
 pub(crate) fn read_live_runtime_info(path: &Path) -> Result<CatHubRuntimeInfo> {
     let info = read_runtime_info(path, None)?;
     let pid = Pid::from_u32(info.pid);
@@ -69,10 +69,18 @@ pub(crate) fn read_live_runtime_info(path: &Path) -> Result<CatHubRuntimeInfo> {
         true,
         ProcessRefreshKind::nothing(),
     );
-    if system.process(pid).is_none() {
+    let Some(process) = system.process(pid) else {
         bail!("runtime manifest publisher PID {} is not running", info.pid);
+    };
+    if !is_cathub_process_name(process.name()) {
+        bail!("runtime manifest publisher PID {} is not CatHub", info.pid);
     }
     Ok(info)
+}
+
+fn is_cathub_process_name(name: &std::ffi::OsStr) -> bool {
+    name.to_string_lossy().eq_ignore_ascii_case("cathub")
+        || name.to_string_lossy().eq_ignore_ascii_case("cathub.exe")
 }
 
 fn read_runtime_info(path: &Path, expected_pid: Option<u32>) -> Result<CatHubRuntimeInfo> {
@@ -152,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_manifest_from_running_process() {
+    fn rejects_manifest_from_non_cathub_process() {
         let directory = tempfile::tempdir().expect("temp directory");
         let path = directory.path().join("runtime.json");
         fs::write(
@@ -164,12 +172,16 @@ mod tests {
         )
         .expect("write runtime info");
 
-        assert_eq!(
-            read_live_runtime_info(&path)
-                .expect("live runtime info")
-                .pid,
-            std::process::id()
-        );
+        assert!(read_live_runtime_info(&path).is_err());
+    }
+
+    #[test]
+    fn recognizes_cathub_process_names() {
+        assert!(is_cathub_process_name(std::ffi::OsStr::new("cathub")));
+        assert!(is_cathub_process_name(std::ffi::OsStr::new("CatHub.exe")));
+        assert!(!is_cathub_process_name(std::ffi::OsStr::new(
+            "IntelSoftwareAssetManagerService"
+        )));
     }
 
     #[test]

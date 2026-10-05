@@ -21,10 +21,20 @@ internal static class ImportAdifCommand
             return 1;
         }
 
+        await using var input = File.OpenRead(filePath);
+        var response = await ImportAsync(channel, input, refresh, cancellationToken);
+        PrintResponse(response);
+        return 0;
+    }
+
+    internal static async Task<ImportAdifResponse> ImportAsync(
+        GrpcChannel channel,
+        Stream input,
+        bool refresh,
+        CancellationToken cancellationToken = default)
+    {
         var client = new LogbookService.LogbookServiceClient(channel);
         using var call = client.ImportAdif(cancellationToken: cancellationToken);
-        await using var input = File.OpenRead(filePath);
-
         await foreach (var request in ReadRequestsAsync(input, refresh, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -34,8 +44,11 @@ internal static class ImportAdifCommand
         }
 
         await call.RequestStream.CompleteAsync().WaitAsync(cancellationToken);
-        var response = await call.ResponseAsync.WaitAsync(cancellationToken);
+        return await call.ResponseAsync.WaitAsync(cancellationToken);
+    }
 
+    internal static void PrintResponse(ImportAdifResponse response)
+    {
         Console.WriteLine($"Imported:  {response.RecordsImported}");
         Console.WriteLine($"Updated:   {response.RecordsUpdated}");
         Console.WriteLine($"Skipped:   {response.RecordsSkipped}");
@@ -44,8 +57,6 @@ internal static class ImportAdifCommand
         {
             Console.WriteLine($"  Warning: {warning}");
         }
-
-        return 0;
     }
 
     internal static async IAsyncEnumerable<ImportAdifRequest> ReadRequestsAsync(

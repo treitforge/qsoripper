@@ -349,7 +349,7 @@ Use `cargo run -p qsoripper-stress -- --help` and `cargo run -p qsoripper-stress
 
 ### Avalonia GUI automation
 
-For repeatable desktop UX inspection, the Avalonia GUI now supports a fixture-backed live inspection mode plus a Windows automation driver. The driver builds the GUI into a per-run output folder under `artifacts\ux\automation-bin\`, launches it with deterministic fixture data, performs scripted UI actions, and saves screenshots plus UI tree dumps under `artifacts\ux\current\`.
+For repeatable desktop UX inspection, the Avalonia GUI now supports a fixture-backed live inspection mode plus a Windows automation driver. The driver builds the GUI into a per-run output folder under `artifacts\ux\automation-bin\`, launches it with deterministic fixture data, performs scripted UI actions, and saves screenshots plus UI tree dumps under `artifacts\ux\current\`. By default, `drive-avalonia.ps1` deletes the current run's temporary build output when the run finishes, and it also prunes leftover old build-run folders while keeping the latest 3 runs per scenario/configuration. Use `-KeepBuildOutput`, `-KeepBuildRuns`, or `-NoPruneBuildOutputs` to override that behavior.
 
 The inspection harness supports `MainWindow`, `Settings`, and `Wizard` surfaces. Scenarios can select a surface with `inspectSurface` in the action JSON, or you can override it with `-Surface` on `drive-avalonia.ps1`.
 

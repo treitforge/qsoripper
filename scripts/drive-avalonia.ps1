@@ -9,6 +9,10 @@ param(
     [ValidateSet("Default", "Dark", "Light")]
     [string]$Theme = "Dark",
     [string]$OutputRoot,
+    [ValidateRange(1, 100)]
+    [int]$KeepBuildRuns = 3,
+    [switch]$NoPruneBuildOutputs,
+    [switch]$KeepBuildOutput,
     [switch]$KeepOpen
 )
 
@@ -43,8 +47,44 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $runId = [DateTimeOffset]::UtcNow.ToString("yyyyMMddHHmmssfff")
-$buildOutputRoot = Join-Path $repoRoot ("artifacts\ux\automation-bin\" + $Configuration + "\" + $scenarioName + "\" + $runId + "\")
+$scenarioBuildRoot = Join-Path $repoRoot ("artifacts\ux\automation-bin\" + $Configuration + "\" + $scenarioName)
+$buildOutputRoot = Join-Path $scenarioBuildRoot ($runId + "\")
 New-Item -ItemType Directory -Force -Path $OutputRoot, $buildOutputRoot | Out-Null
+
+function Prune-BuildOutputs {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ScenarioBuildRoot,
+        [Parameter(Mandatory)]
+        [int]$KeepRuns
+    )
+
+    if (-not (Test-Path -LiteralPath $ScenarioBuildRoot)) {
+        return
+    }
+
+    $runDirectories = Get-ChildItem -LiteralPath $ScenarioBuildRoot -Directory |
+        Where-Object { $_.Name -match '^\d{17}$' } |
+        Sort-Object Name -Descending
+
+    if ($runDirectories.Count -le $KeepRuns) {
+        return
+    }
+
+    $pruned = 0
+    foreach ($directory in ($runDirectories | Select-Object -Skip $KeepRuns)) {
+        Remove-Item -LiteralPath $directory.FullName -Recurse -Force
+        $pruned++
+    }
+
+    if ($pruned -gt 0) {
+        Write-Host "Pruned $pruned old automation build run(s) from $ScenarioBuildRoot"
+    }
+}
+
+if (-not $NoPruneBuildOutputs) {
+    Prune-BuildOutputs -ScenarioBuildRoot $scenarioBuildRoot -KeepRuns $KeepBuildRuns
+}
 
 $actionSpec = Get-Content -LiteralPath $ActionScript -Raw | ConvertFrom-Json -Depth 20
 $inspectSurface = if (-not [string]::IsNullOrWhiteSpace($Surface)) {
@@ -721,6 +761,7 @@ try {
         inspectSurface = $inspectSurface
         outputRoot = $OutputRoot
         buildOutputRoot = $buildOutputRoot
+        buildOutputRetained = ($KeepOpen -or $KeepBuildOutput)
         processId = $process.Id
         artifacts = $script:Artifacts
         capturedAtUtc = [DateTimeOffset]::UtcNow.ToString("O")
@@ -737,6 +778,10 @@ finally {
         if ($null -ne $running) {
             Stop-Process -Id $process.Id
         }
+    }
+
+    if (-not $KeepOpen -and -not $KeepBuildOutput -and (Test-Path -LiteralPath $buildOutputRoot)) {
+        Remove-Item -LiteralPath $buildOutputRoot -Recurse -Force
     }
 
     Pop-Location

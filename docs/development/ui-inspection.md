@@ -104,6 +104,9 @@ Notes:
 
 - This path launches the real Avalonia window, drives it through Windows UI Automation, and captures screenshots plus UI tree dumps.
 - Use it when you need real clicks, typing, menu traversal, combo-box expansion, or modal dialog inspection.
+- Build outputs are written under `artifacts\ux\automation-bin\<Configuration>\<scenario>\<runId>\`.
+- The current run's build output is deleted automatically when the run finishes unless you pass `-KeepBuildOutput` or `-KeepOpen`.
+- Leftover old build outputs are also pruned automatically by default; the script keeps the latest 3 runs per scenario/configuration. Use `-KeepBuildRuns` to change the retention count or `-NoPruneBuildOutputs` to disable pruning for a session.
 
 ### Terminal workflow capture
 

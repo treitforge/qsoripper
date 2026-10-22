@@ -26,6 +26,9 @@ mod serial_face;
 mod state;
 
 #[cfg(test)]
+mod emulator;
+
+#[cfg(test)]
 mod integration;
 
 use std::path::PathBuf;

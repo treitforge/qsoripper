@@ -62,6 +62,13 @@ try
             "restore" => await RestoreQsoCommand.RunAsync(channel, arguments.Callsign!),
             "purge" => await PurgeCommand.RunAsync(channel, arguments.RemainingArgs),
             "import" => await ImportAdifCommand.RunAsync(channel, arguments.Callsign ?? arguments.RemainingArgs.FirstOrDefault() ?? "", arguments.Refresh, cancellationSource.Token),
+            "import-cabrillo" => await ImportCabrilloCommand.RunAsync(
+                channel,
+                arguments.Callsign ?? "",
+                arguments.RemainingArgs,
+                arguments.Refresh,
+                arguments.JsonOutput,
+                cancellationSource.Token),
             "export" => await ExportAdifCommand.RunAsync(channel, arguments.RemainingArgs, cancellationSource.Token),
             "config" => await ConfigCommand.RunAsync(channel, arguments.RemainingArgs, arguments.JsonOutput),
             "setup" => await SetupCommand.RunAsync(channel, arguments),

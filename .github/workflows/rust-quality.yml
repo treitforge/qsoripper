@@ -60,7 +60,7 @@ jobs:
 
       - name: Install cargo-deny
         run: |
-          cargo install cargo-deny --locked
+          cargo install cargo-deny --version 0.20.2 --locked
 
       - name: Install cargo-llvm-cov
         run: |

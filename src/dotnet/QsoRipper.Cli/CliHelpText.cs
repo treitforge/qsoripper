@@ -21,6 +21,7 @@ internal static class CliHelpText
 
             ADIF:
               import <file>                    Import QSOs from an ADIF file
+              import-cabrillo <file>           Convert, import, and enrich a Cabrillo log
               export [--file out.adi]          Export QSOs to ADIF (stdout, file, or directory)
 
             Lookup:
@@ -205,6 +206,22 @@ internal static class CliHelpText
                   --refresh            Update existing records instead of skipping duplicates.
                                        Non-empty import fields overwrite; fields absent from the
                                        import are preserved.
+                """,
+            "import-cabrillo" => """
+                Usage: import-cabrillo <file-path> [options]
+
+                Convert a Cabrillo log to ADIF, import its QSOs, and apply QRZ XML enrichment.
+                The command ignores X-QSO records and keeps contest exchanges.
+
+                  --refresh                Update duplicate records with non-empty import fields
+                  --no-enrich              Do not apply QRZ enrichment after import
+                  --digital-mode <mode>    Set the ADIF mode for generic Cabrillo DG records
+                  --adif-output <path>     Keep a copy of the converted ADIF data
+
+                Examples:
+                  import-cabrillo cq-ww.log
+                  import-cabrillo ft8-roundup.log --digital-mode FT8
+                  import-cabrillo field-day.log --adif-output field-day.adi
                 """,
             "export" => """
                 Usage: export [options]

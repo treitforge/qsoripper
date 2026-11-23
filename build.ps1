@@ -694,7 +694,7 @@ function Check-Rust {
     $denyCmd = Get-Command cargo-deny -ErrorAction SilentlyContinue
     if (-not $denyCmd) {
         Write-Step 'cargo deny'
-        Write-Host 'cargo-deny not installed, skipping. Install with: cargo install cargo-deny' -ForegroundColor Yellow
+        Write-Host 'cargo-deny not installed, skipping. Install with: cargo install cargo-deny --version 0.20.2 --locked' -ForegroundColor Yellow
     }
     else {
         Write-Step 'cargo deny'

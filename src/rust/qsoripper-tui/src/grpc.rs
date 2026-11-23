@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use anyhow::{bail, Context};
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use qsoripper_core::utc;
 use tonic::transport::{Channel, Endpoint};
 
 use qsoripper_core::domain::band::{band_from_adif, band_to_adif};
@@ -158,13 +158,8 @@ pub(crate) async fn list_recent_qsos(
         let (date, utc) = qso
             .utc_timestamp
             .as_ref()
-            .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, 0))
-            .map(|dt| {
-                (
-                    dt.format("%Y-%m-%d").to_string(),
-                    dt.format("%H:%M").to_string(),
-                )
-            })
+            .and_then(utc::from_timestamp)
+            .map(|dt| (utc::format_date(dt), utc::format_minutes(dt)))
             .unwrap_or_default();
 
         let band = Band::try_from(qso.band)
@@ -589,14 +584,8 @@ fn parse_optional_date(s: &str) -> anyhow::Result<Option<prost_types::Timestamp>
     if trimmed.is_empty() {
         return Ok(None);
     }
-    let naive_date = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").context("invalid QSL date")?;
-    let naive = naive_date
-        .and_hms_opt(0, 0, 0)
-        .context("invalid QSL date")?;
-    Ok(Some(prost_types::Timestamp {
-        seconds: naive.and_utc().timestamp(),
-        nanos: 0,
-    }))
+    let date = utc::parse_date(trimmed).context("invalid QSL date")?;
+    Ok(Some(utc::to_timestamp(date.midnight().assume_utc())))
 }
 
 pub(crate) fn format_qsl_status(status: i32) -> String {
@@ -608,14 +597,14 @@ pub(crate) fn format_qsl_status(status: i32) -> String {
 }
 
 pub(crate) fn format_optional_date(ts: Option<&prost_types::Timestamp>) -> String {
-    ts.and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, 0))
-        .map(|dt| dt.format("%Y-%m-%d").to_string())
+    ts.and_then(utc::from_timestamp)
+        .map(utc::format_date)
         .unwrap_or_default()
 }
 
 pub(crate) fn format_optional_timestamp(ts: Option<&prost_types::Timestamp>) -> String {
-    ts.and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, 0))
-        .map(|dt| dt.format("%Y-%m-%d %H:%M:%SZ").to_string())
+    ts.and_then(utc::from_timestamp)
+        .map(|dt| format!("{}Z", utc::format_datetime(dt)))
         .unwrap_or_default()
 }
 
@@ -697,12 +686,9 @@ fn station_snapshot_from_form(form: &LogForm) -> anyhow::Result<Option<StationSn
 
 /// Parse a date string (`YYYY-MM-DD`) and time string (`HH:MM`) into a protobuf timestamp.
 fn parse_timestamp(date: &str, time: &str) -> anyhow::Result<prost_types::Timestamp> {
-    let naive_date = NaiveDate::parse_from_str(date, "%Y-%m-%d").context("invalid date")?;
-    let naive_time =
-        NaiveTime::parse_from_str(&format!("{time}:00"), "%H:%M:%S").context("invalid time")?;
-    let naive = NaiveDateTime::new(naive_date, naive_time);
-    let seconds = naive.and_utc().timestamp();
-    Ok(prost_types::Timestamp { seconds, nanos: 0 })
+    let date = utc::parse_date(date).context("invalid date")?;
+    let time = utc::parse_minutes(time).context("invalid time")?;
+    Ok(utc::to_timestamp(date.with_time(time).assume_utc()))
 }
 
 /// Parse an RST string (e.g., `"59"` or `"599"`) into an [`RstReport`].

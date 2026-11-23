@@ -14,9 +14,9 @@ prost-types = { workspace = true }
 tonic = { workspace = true }
 tokio = { workspace = true, features = ["process", "time"] }
 uuid = { workspace = true }
-difa = "0.1"
+difa = "0.2"
 thiserror = "2"
-chrono = "0.4"
+time = { workspace = true }
 futures = "0.3"
 quick-xml = { version = "0.41", features = ["serialize"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

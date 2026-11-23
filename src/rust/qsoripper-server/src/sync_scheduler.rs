@@ -98,12 +98,18 @@ impl SyncScheduler {
                 }
 
                 // ── Compute and publish the next sync time ───────────
-                let wake_at = chrono::Utc::now()
-                    + chrono::Duration::seconds(i64::try_from(interval_secs).unwrap_or(300));
-                *next_sync.lock().await = Some(Timestamp {
-                    seconds: wake_at.timestamp(),
-                    nanos: 0,
-                });
+                let Some(wake_at) =
+                    next_sync_timestamp_at(time::OffsetDateTime::now_utc(), interval_secs)
+                else {
+                    *next_sync.lock().await = None;
+                    *last_error.lock().await =
+                        Some("Sync interval exceeds the supported timestamp range.".to_string());
+                    if wait_or_cancel(&mut cancel_rx, Duration::from_secs(30)).await {
+                        break;
+                    }
+                    continue;
+                };
+                *next_sync.lock().await = Some(wake_at);
 
                 // ── Wait for the interval (or cancellation) ──────────
                 if wait_or_cancel(&mut cancel_rx, Duration::from_secs(interval_secs)).await {
@@ -212,6 +218,15 @@ impl SyncScheduler {
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn next_sync_timestamp_at(now: time::OffsetDateTime, interval_secs: u64) -> Option<Timestamp> {
+    let duration = time::Duration::try_from(Duration::from_secs(interval_secs)).ok()?;
+    let wake_at = now.checked_add(duration)?;
+    Some(Timestamp {
+        seconds: wake_at.unix_timestamp(),
+        nanos: 0,
+    })
+}
+
 /// Sleep for `duration`, but return early if `cancel_rx` fires.
 /// Returns `true` when cancellation was received.
 async fn wait_or_cancel(cancel_rx: &mut watch::Receiver<bool>, duration: Duration) -> bool {
@@ -231,6 +246,36 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use tokio::time::Duration;
+
+    #[test]
+    fn next_sync_timestamp_preserves_the_configured_interval() {
+        let now = time::macros::datetime!(2026-01-01 00:00 UTC);
+        assert_eq!(
+            next_sync_timestamp_at(now, 300),
+            Some(Timestamp {
+                seconds: now.unix_timestamp() + 300,
+                nanos: 0
+            })
+        );
+        assert_eq!(
+            next_sync_timestamp_at(now, 0),
+            Some(Timestamp {
+                seconds: now.unix_timestamp(),
+                nanos: 0
+            })
+        );
+    }
+
+    #[test]
+    fn next_sync_timestamp_rejects_overflow() {
+        assert!(
+            next_sync_timestamp_at(time::macros::datetime!(2026-01-01 00:00 UTC), u64::MAX)
+                .is_none()
+        );
+        assert!(
+            next_sync_timestamp_at(time::macros::datetime!(9999-12-31 23:59:59 UTC), 1).is_none()
+        );
+    }
 
     /// Helper: build a `RuntimeConfigManager` with custom overrides.
     fn make_config(overrides: &[(&str, &str)]) -> Arc<RuntimeConfigManager> {

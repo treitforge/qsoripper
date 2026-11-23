@@ -80,19 +80,17 @@ async fn parse_basic_qsos_file() {
     assert_eq!(
         q2.qsl_sent_date
             .as_ref()
-            .map(|ts| chrono::DateTime::from_timestamp(ts.seconds, 0)
-                .unwrap()
-                .format("%Y%m%d")
-                .to_string()),
+            .map(|ts| qsoripper_core::utc::format_adif_date(
+                qsoripper_core::utc::from_timestamp(ts).unwrap()
+            )),
         Some("20260120".to_string())
     );
     assert_eq!(
         q2.qsl_received_date
             .as_ref()
-            .map(|ts| chrono::DateTime::from_timestamp(ts.seconds, 0)
-                .unwrap()
-                .format("%Y%m%d")
-                .to_string()),
+            .map(|ts| qsoripper_core::utc::format_adif_date(
+                qsoripper_core::utc::from_timestamp(ts).unwrap()
+            )),
         Some("20260122".to_string())
     );
 
@@ -348,20 +346,18 @@ async fn round_trip_new_adif_top_fields() {
         round_tripped
             .qsl_sent_date
             .as_ref()
-            .map(|ts| chrono::DateTime::from_timestamp(ts.seconds, 0)
-                .unwrap()
-                .format("%Y%m%d")
-                .to_string()),
+            .map(|ts| qsoripper_core::utc::format_adif_date(
+                qsoripper_core::utc::from_timestamp(ts).unwrap()
+            )),
         Some("20250120".to_string())
     );
     assert_eq!(
         round_tripped
             .qsl_received_date
             .as_ref()
-            .map(|ts| chrono::DateTime::from_timestamp(ts.seconds, 0)
-                .unwrap()
-                .format("%Y%m%d")
-                .to_string()),
+            .map(|ts| qsoripper_core::utc::format_adif_date(
+                qsoripper_core::utc::from_timestamp(ts).unwrap()
+            )),
         Some("20250122".to_string())
     );
 }

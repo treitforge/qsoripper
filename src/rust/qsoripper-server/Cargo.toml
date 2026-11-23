@@ -8,9 +8,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-chrono = "0.4"
+time = { workspace = true }
 dotenvy = "0.15"
-keyring = "4.1.5"
+keyring-core = "1.1"
 qsoripper-core = { path = "../qsoripper-core", version = "0.1.0" }
 qsoripper-storage-memory = { path = "../qsoripper-storage-memory", version = "0.1.0" }
 qsoripper-storage-sqlite = { path = "../qsoripper-storage-sqlite", version = "0.1.0" }
@@ -23,6 +23,15 @@ tokio-stream = { version = "0.1", features = ["net"] }
 toml = "0.8"
 toml_edit = "0.22"
 tonic = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = "1.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1.0.3", features = ["keychain"] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+dbus-secret-service-keyring-store = { version = "1.0.1", features = ["crypto-rust", "vendored"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -10,10 +10,10 @@ use crate::proto::qsoripper::domain::{
 use crate::storage::{
     DeletedRecordsFilter, EngineStorage, LogbookCounts, QsoListQuery, StorageError, SyncMetadata,
 };
-use chrono::Utc;
 use prost_types::Timestamp;
 use std::sync::Arc;
 use thiserror::Error;
+use time::OffsetDateTime;
 
 const ADIF_DUPLICATE_TIME_WINDOW_SECONDS: i64 = 59;
 const ADIF_DUPLICATE_FREQUENCY_TOLERANCE_HZ: u64 = 100;
@@ -1066,11 +1066,7 @@ fn non_empty_trimmed_option(value: Option<&str>) -> Option<String> {
 }
 
 fn now_timestamp() -> Timestamp {
-    let now = Utc::now();
-    Timestamp {
-        seconds: now.timestamp(),
-        nanos: i32::try_from(now.timestamp_subsec_nanos()).unwrap_or(0),
-    }
+    crate::utc::to_timestamp(OffsetDateTime::now_utc())
 }
 
 /// Return whether a QSO should count as pending upload work.

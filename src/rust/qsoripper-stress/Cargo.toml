@@ -7,8 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-chrono = "0.4"
-difa = "0.1"
+difa = "0.2"
 prost-types = { workspace = true }
 qsoripper-core = { path = "../qsoripper-core", version = "0.1.0" }
 sysinfo = "0.33"

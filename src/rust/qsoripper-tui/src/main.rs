@@ -202,7 +202,7 @@ fn handle_event_with_channel(
             handle_key_with_channel(app, key, channel, event_tx, lookup_tx, rig_enabled_tx);
         }
         AppEvent::Tick => {
-            app.utc_now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            app.utc_now = qsoripper_core::utc::format_datetime(time::OffsetDateTime::now_utc());
         }
         AppEvent::LookupResult(result) => apply_lookup_result(app, result),
         AppEvent::SpaceWeather(sw) => {
@@ -1044,14 +1044,14 @@ fn load_qso_into_form(app: &mut App, local_id: &str, lookup_tx: &watch::Sender<S
         .and_then(qsoripper_core::domain::band::band_to_adif)
         .map(str::to_string);
     if let Some(ref ts) = src.utc_timestamp {
-        if let Some(dt) = chrono::DateTime::from_timestamp(ts.seconds, 0) {
-            app.form.date = dt.format("%Y-%m-%d").to_string();
+        if let Some(dt) = qsoripper_core::utc::from_timestamp(ts) {
+            app.form.date = qsoripper_core::utc::format_date(dt);
         }
     }
     app.form.timestamp_automatic = false;
     if let Some(ref ts) = src.utc_end_timestamp {
-        if let Some(dt) = chrono::DateTime::from_timestamp(ts.seconds, 0) {
-            app.form.time_off = dt.format("%H:%M").to_string();
+        if let Some(dt) = qsoripper_core::utc::from_timestamp(ts) {
+            app.form.time_off = qsoripper_core::utc::format_minutes(dt);
         }
     }
     // qth is not stored on QsoRecord; it comes from the lookup result.
@@ -1161,7 +1161,7 @@ fn spawn_log_qso(
     let mut form_snap = app.form.clone();
     let editing_id = app.editing_local_id.clone();
     if editing_id.is_none() && app.qso_timer_active {
-        form_snap.time_off = chrono::Utc::now().format("%H:%M").to_string();
+        form_snap.time_off = qsoripper_core::utc::format_minutes(time::OffsetDateTime::now_utc());
     }
     let lookup_snap = app.lookup_result.as_ref().map(|info| {
         (

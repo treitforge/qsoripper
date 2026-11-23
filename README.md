@@ -102,7 +102,13 @@ winget install Microsoft.DotNet.SDK.10
 sudo apt install dotnet-sdk-10.0
 ```
 
-The repository pins SDK `10.0.201` in `global.json`.
+The repository requires SDK `10.0.404` or a later .NET 10 SDK through `global.json`.
+This minimum includes the security update for the Native AOT compiler.
+To update an existing Windows installation, run:
+
+```powershell
+winget upgrade --id Microsoft.DotNet.SDK.10 --exact
+```
 
 **Node.js + npm** -- required for the repo-local Playwright tooling and for bootstrapping the local Terminalizer runtime used by terminal capture:
 

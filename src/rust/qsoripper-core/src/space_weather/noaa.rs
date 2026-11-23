@@ -2,7 +2,6 @@
 
 use std::{env, fmt, time::Duration};
 
-use chrono::NaiveDate;
 use prost_types::Timestamp;
 use reqwest::Client;
 use serde::Deserialize;
@@ -301,16 +300,16 @@ fn geomagnetic_storm_scale(kp: f64) -> Option<u32> {
 }
 
 fn parse_noaa_timestamp(raw: &str) -> Result<Timestamp, SpaceWeatherProviderError> {
-    let timestamp =
-        chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S").map_err(|error| {
-            SpaceWeatherProviderError::parse(format!(
-                "Failed to parse NOAA K-index timestamp '{raw}': {error}"
-            ))
-        })?;
-    Ok(Timestamp {
-        seconds: timestamp.and_utc().timestamp(),
-        nanos: i32::try_from(timestamp.and_utc().timestamp_subsec_nanos()).unwrap_or(i32::MAX),
-    })
+    let timestamp = time::PrimitiveDateTime::parse(
+        raw,
+        time::macros::format_description!("[year]-[month padding:none]-[day padding:none]T[hour padding:none]:[minute padding:none]:[second padding:none]"),
+    )
+    .map_err(|error| {
+        SpaceWeatherProviderError::parse(format!(
+            "Failed to parse NOAA K-index timestamp '{raw}': {error}"
+        ))
+    })?;
+    Ok(crate::utc::to_timestamp(timestamp.assume_utc()))
 }
 
 fn parse_daily_solar_indices(body: &str) -> Result<DailySolarIndices, SpaceWeatherProviderError> {
@@ -342,12 +341,12 @@ fn parse_daily_solar_indices(body: &str) -> Result<DailySolarIndices, SpaceWeath
             "Failed to parse NOAA solar indices year '{year_raw}': {error}"
         ))
     })?;
-    let month = month_raw.parse::<u32>().map_err(|error| {
+    let month = month_raw.parse::<u8>().map_err(|error| {
         SpaceWeatherProviderError::parse(format!(
             "Failed to parse NOAA solar indices month '{month_raw}': {error}"
         ))
     })?;
-    let day = day_raw.parse::<u32>().map_err(|error| {
+    let day = day_raw.parse::<u8>().map_err(|error| {
         SpaceWeatherProviderError::parse(format!(
             "Failed to parse NOAA solar indices day '{day_raw}': {error}"
         ))
@@ -363,11 +362,13 @@ fn parse_daily_solar_indices(body: &str) -> Result<DailySolarIndices, SpaceWeath
         ))
     })?;
 
-    NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
-        SpaceWeatherProviderError::parse(format!(
-            "NOAA daily solar indices date '{year:04}-{month:02}-{day:02}' is invalid."
-        ))
-    })?;
+    time::Month::try_from(month)
+        .and_then(|month| time::Date::from_calendar_date(year, month, day))
+        .map_err(|_| {
+            SpaceWeatherProviderError::parse(format!(
+                "NOAA daily solar indices date '{year:04}-{month:02}-{day:02}' is invalid."
+            ))
+        })?;
 
     Ok(DailySolarIndices {
         solar_flux_index,

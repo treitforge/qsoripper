@@ -475,14 +475,14 @@ impl LookupCoordinator {
         // Persist to the snapshot store if available.
         if let Some(ref storage) = self.snapshot_storage {
             let ttl = self.ttl_for(&entry);
-            let now_utc = chrono::Utc::now();
+            let now_utc = time::OffsetDateTime::now_utc();
             let stored_at = prost_types::Timestamp {
-                seconds: now_utc.timestamp(),
+                seconds: now_utc.unix_timestamp(),
                 nanos: 0,
             };
             let ttl_secs = i64::try_from(ttl.as_secs()).unwrap_or(i64::MAX);
             let expires_at = prost_types::Timestamp {
-                seconds: now_utc.timestamp().saturating_add(ttl_secs),
+                seconds: now_utc.unix_timestamp().saturating_add(ttl_secs),
                 nanos: 0,
             };
             let result = match &entry.lookup {
@@ -535,7 +535,7 @@ impl LookupCoordinator {
 
         // Check expiry — if expired, don't use.
         if let Some(ref expires_at) = snapshot.expires_at {
-            let now_secs = chrono::Utc::now().timestamp();
+            let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
             if now_secs >= expires_at.seconds {
                 return None;
             }
@@ -554,7 +554,7 @@ impl LookupCoordinator {
         // Reconstruct a cache entry with its Instant set so TTL checks pass.
         // Use the remaining lifetime to back-date `cached_at`.
         let remaining = snapshot.expires_at.map_or(Duration::ZERO, |e| {
-            let now_secs = chrono::Utc::now().timestamp();
+            let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
             let remaining_secs =
                 u64::try_from(e.seconds.saturating_sub(now_secs).max(0)).unwrap_or(0);
             Duration::from_secs(remaining_secs)
@@ -1140,7 +1140,7 @@ mod tests {
         let storage = Arc::new(MockSnapshotStorage::new());
 
         // Pre-populate a fresh snapshot in storage (expires far in the future).
-        let now_secs = chrono::Utc::now().timestamp();
+        let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
         let snapshot = LookupSnapshot {
             callsign: "W1AW".to_string(),
             result: LookupResult {
@@ -1192,7 +1192,7 @@ mod tests {
         let storage = Arc::new(MockSnapshotStorage::new());
 
         // Pre-populate an expired snapshot in storage.
-        let now_secs = chrono::Utc::now().timestamp();
+        let now_secs = time::OffsetDateTime::now_utc().unix_timestamp();
         let snapshot = LookupSnapshot {
             callsign: "W1AW".to_string(),
             result: LookupResult {

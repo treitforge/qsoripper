@@ -2,9 +2,9 @@
 
 use std::{env, fmt, path::PathBuf, time::Duration};
 
-use chrono::{DateTime, Datelike, NaiveDate, NaiveTime};
 use prost_types::Timestamp;
 use serde::Deserialize;
+use time::{Date, OffsetDateTime, PrimitiveDateTime, Time};
 
 use crate::proto::qsoripper::domain::{ContestCalendarEntry, ContestDetailsStatus};
 
@@ -228,8 +228,10 @@ fn parse_wa7bnm_rss(
         .channel
         .last_build_date
         .as_deref()
-        .and_then(|value| DateTime::parse_from_rfc2822(value).ok())
-        .map_or_else(|| chrono::Utc::now().year(), |value| value.year());
+        .and_then(|value| {
+            OffsetDateTime::parse(value, &time::format_description::well_known::Rfc2822).ok()
+        })
+        .map_or_else(|| OffsetDateTime::now_utc().year(), OffsetDateTime::year);
 
     rss.channel
         .item
@@ -290,11 +292,11 @@ fn parse_schedule(
     let date = parse_month_day(date.trim(), source_year)?;
     let start = parse_utc_time(start_time.trim())?;
     let end = parse_utc_time(end_time.trim())?;
-    let start_date_time = date.and_time(start);
-    let mut end_date_time = date.and_time(end);
+    let start_date_time = date.with_time(start);
+    let mut end_date_time = date.with_time(end);
     if end_date_time <= start_date_time {
         end_date_time = end_date_time
-            .checked_add_signed(chrono::Duration::days(1))
+            .checked_add(time::Duration::days(1))
             .ok_or_else(|| ContestCalendarProviderError::parse("contest end overflow"))?;
     }
     Ok((
@@ -317,16 +319,16 @@ fn split_multi_day(description: &str) -> Option<(&str, &str)> {
 fn parse_time_and_date(
     part: &str,
     source_year: i32,
-) -> Result<chrono::NaiveDateTime, ContestCalendarProviderError> {
+) -> Result<PrimitiveDateTime, ContestCalendarProviderError> {
     let (time, date) = part.split_once(',').ok_or_else(|| {
         ContestCalendarProviderError::parse(format!("missing comma in schedule part '{part}'"))
     })?;
     let date = parse_month_day(date.trim(), source_year)?;
     let time = parse_utc_time(time.trim())?;
-    Ok(date.and_time(time))
+    Ok(date.with_time(time))
 }
 
-fn parse_month_day(value: &str, year: i32) -> Result<NaiveDate, ContestCalendarProviderError> {
+fn parse_month_day(value: &str, year: i32) -> Result<Date, ContestCalendarProviderError> {
     let mut parts = value.split_whitespace();
     let month = parts.next().ok_or_else(|| {
         ContestCalendarProviderError::parse(format!("missing month in '{value}'"))
@@ -334,7 +336,7 @@ fn parse_month_day(value: &str, year: i32) -> Result<NaiveDate, ContestCalendarP
     let day = parts
         .next()
         .ok_or_else(|| ContestCalendarProviderError::parse(format!("missing day in '{value}'")))?
-        .parse::<u32>()
+        .parse::<u8>()
         .map_err(|_| ContestCalendarProviderError::parse(format!("invalid day in '{value}'")))?;
     let month = match month {
         "Jan" | "January" => 1,
@@ -355,11 +357,12 @@ fn parse_month_day(value: &str, year: i32) -> Result<NaiveDate, ContestCalendarP
             )))
         }
     };
-    NaiveDate::from_ymd_opt(year, month, day)
-        .ok_or_else(|| ContestCalendarProviderError::parse(format!("invalid date '{value}'")))
+    time::Month::try_from(month)
+        .and_then(|month| Date::from_calendar_date(year, month, day))
+        .map_err(|_| ContestCalendarProviderError::parse(format!("invalid date '{value}'")))
 }
 
-fn parse_utc_time(value: &str) -> Result<NaiveTime, ContestCalendarProviderError> {
+fn parse_utc_time(value: &str) -> Result<Time, ContestCalendarProviderError> {
     let value = value.trim_end_matches('Z');
     if value.len() != 4 {
         return Err(ContestCalendarProviderError::parse(format!(
@@ -367,20 +370,17 @@ fn parse_utc_time(value: &str) -> Result<NaiveTime, ContestCalendarProviderError
         )));
     }
     let hour = value[0..2]
-        .parse::<u32>()
+        .parse::<u8>()
         .map_err(|_| ContestCalendarProviderError::parse(format!("invalid UTC hour '{value}'")))?;
-    let minute = value[2..4].parse::<u32>().map_err(|_| {
+    let minute = value[2..4].parse::<u8>().map_err(|_| {
         ContestCalendarProviderError::parse(format!("invalid UTC minute '{value}'"))
     })?;
-    NaiveTime::from_hms_opt(hour, minute, 0)
-        .ok_or_else(|| ContestCalendarProviderError::parse(format!("invalid UTC time '{value}'")))
+    Time::from_hms(hour, minute, 0)
+        .map_err(|_| ContestCalendarProviderError::parse(format!("invalid UTC time '{value}'")))
 }
 
-fn timestamp_from_naive(value: chrono::NaiveDateTime) -> Timestamp {
-    Timestamp {
-        seconds: value.and_utc().timestamp(),
-        nanos: 0,
-    }
+fn timestamp_from_naive(value: PrimitiveDateTime) -> Timestamp {
+    crate::utc::to_timestamp(value.assume_utc())
 }
 
 fn stable_contest_id(name: &str, start: &Timestamp) -> String {
@@ -484,18 +484,8 @@ mod tests {
         let (start, end) =
             parse_schedule("0000Z, May 30 to 2359Z, May 31", 2026).expect("schedule");
 
-        let expected_start = NaiveDate::from_ymd_opt(2026, 5, 30)
-            .expect("start date")
-            .and_hms_opt(0, 0, 0)
-            .expect("start time")
-            .and_utc()
-            .timestamp();
-        let expected_end = NaiveDate::from_ymd_opt(2026, 5, 31)
-            .expect("end date")
-            .and_hms_opt(23, 59, 0)
-            .expect("end time")
-            .and_utc()
-            .timestamp();
+        let expected_start = time::macros::datetime!(2026-05-30 00:00 UTC).unix_timestamp();
+        let expected_end = time::macros::datetime!(2026-05-31 23:59 UTC).unix_timestamp();
 
         assert_eq!(start.seconds, expected_start);
         assert_eq!(end.seconds, expected_end);

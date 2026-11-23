@@ -848,51 +848,48 @@ fn parse_adif_datetime(date_str: &str, time_str: Option<&str>) -> Option<prost_t
     }
 
     let year: i32 = date_str[0..4].parse().ok()?;
-    let month: u32 = date_str[4..6].parse().ok()?;
-    let day: u32 = date_str[6..8].parse().ok()?;
+    let month: u8 = date_str[4..6].parse().ok()?;
+    let day: u8 = date_str[6..8].parse().ok()?;
 
-    let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+    let date =
+        time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()?;
 
     let time = if let Some(ts) = time_str {
         match ts.len() {
             4 => {
-                let h: u32 = ts[0..2].parse().ok()?;
-                let m: u32 = ts[2..4].parse().ok()?;
-                chrono::NaiveTime::from_hms_opt(h, m, 0)?
+                let h: u8 = ts[0..2].parse().ok()?;
+                let m: u8 = ts[2..4].parse().ok()?;
+                time::Time::from_hms(h, m, 0).ok()?
             }
             6 => {
-                let h: u32 = ts[0..2].parse().ok()?;
-                let m: u32 = ts[2..4].parse().ok()?;
-                let s: u32 = ts[4..6].parse().ok()?;
-                chrono::NaiveTime::from_hms_opt(h, m, s)?
+                let h: u8 = ts[0..2].parse().ok()?;
+                let m: u8 = ts[2..4].parse().ok()?;
+                let s: u8 = ts[4..6].parse().ok()?;
+                time::Time::from_hms(h, m, s).ok()?
             }
-            _ => chrono::NaiveTime::from_hms_opt(0, 0, 0)?,
+            _ => time::Time::MIDNIGHT,
         }
     } else {
-        chrono::NaiveTime::from_hms_opt(0, 0, 0)?
+        time::Time::MIDNIGHT
     };
 
-    let dt = chrono::NaiveDateTime::new(date, time);
-    let secs = dt.and_utc().timestamp();
-    Some(prost_types::Timestamp {
-        seconds: secs,
-        nanos: 0,
-    })
+    Some(crate::utc::to_timestamp(
+        time::PrimitiveDateTime::new(date, time).assume_utc(),
+    ))
 }
 
 /// Format a prost Timestamp as ADIF date + time strings.
 fn format_adif_datetime(ts: &prost_types::Timestamp) -> Option<(String, String)> {
-    let nanos = u32::try_from(ts.nanos).ok()?;
-    let dt = chrono::DateTime::from_timestamp(ts.seconds, nanos)?.naive_utc();
-    let date = dt.format("%Y%m%d").to_string();
-    let time = dt.format("%H%M%S").to_string();
+    let dt = crate::utc::from_timestamp(ts)?;
+    let date = crate::utc::format_adif_date(dt);
+    let time = crate::utc::format_adif_time(dt);
     Some((date, time))
 }
 
 fn format_adif_date(ts: &prost_types::Timestamp) -> Option<String> {
-    let nanos = u32::try_from(ts.nanos).ok()?;
-    let dt = chrono::DateTime::from_timestamp(ts.seconds, nanos)?.naive_utc();
-    Some(dt.format("%Y%m%d").to_string())
+    Some(crate::utc::format_adif_date(crate::utc::from_timestamp(
+        ts,
+    )?))
 }
 
 fn parse_adif_location(raw_value: &str, latitude: bool) -> Option<f64> {
@@ -1344,11 +1341,9 @@ mod tests {
         let qso = AdifMapper::record_to_qso(&rec);
         let ts = qso.utc_timestamp.unwrap();
 
-        let dt = chrono::DateTime::from_timestamp(ts.seconds, 0)
-            .unwrap()
-            .naive_utc();
-        assert_eq!(dt.format("%Y%m%d").to_string(), "20260115");
-        assert_eq!(dt.format("%H%M").to_string(), "1523");
+        let dt = crate::utc::from_timestamp(&ts).unwrap();
+        assert_eq!(crate::utc::format_adif_date(dt), "20260115");
+        assert_eq!(crate::utc::format_adif_time(dt), "152300");
     }
 
     #[test]
@@ -1359,10 +1354,8 @@ mod tests {
         rec.insert("CALL", "W1AW").unwrap();
         let qso = AdifMapper::record_to_qso(&rec);
         let ts = qso.utc_timestamp.unwrap();
-        let dt = chrono::DateTime::from_timestamp(ts.seconds, 0)
-            .unwrap()
-            .naive_utc();
-        assert_eq!(dt.format("%H%M%S").to_string(), "152345");
+        let dt = crate::utc::from_timestamp(&ts).unwrap();
+        assert_eq!(crate::utc::format_adif_time(dt), "152345");
     }
 
     #[test]
@@ -1668,11 +1661,9 @@ mod tests {
 
         let qso = AdifMapper::record_to_qso(&rec);
         let ts = qso.utc_end_timestamp.expect("end timestamp");
-        let dt = chrono::DateTime::from_timestamp(ts.seconds, 0)
-            .unwrap()
-            .naive_utc();
-        assert_eq!(dt.format("%Y%m%d").to_string(), "20260116");
-        assert_eq!(dt.format("%H%M%S").to_string(), "000200");
+        let dt = crate::utc::from_timestamp(&ts).unwrap();
+        assert_eq!(crate::utc::format_adif_date(dt), "20260116");
+        assert_eq!(crate::utc::format_adif_time(dt), "000200");
     }
 
     #[test]

@@ -460,11 +460,7 @@ async fn wait_or_cancel(cancel_rx: &mut watch::Receiver<bool>, duration: Duratio
 }
 
 fn now_timestamp() -> Timestamp {
-    let now = chrono::Utc::now();
-    Timestamp {
-        seconds: now.timestamp(),
-        nanos: i32::try_from(now.timestamp_subsec_nanos()).unwrap_or(0),
-    }
+    qsoripper_core::utc::to_timestamp(time::OffsetDateTime::now_utc())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

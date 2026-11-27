@@ -3396,12 +3396,7 @@ mod tests {
             true,
         ));
         let (mut client, server_handle) = grpc_logbook_client(service).await;
-        let existing_timestamp = chrono::NaiveDate::from_ymd_opt(2025, 1, 2)
-            .expect("date")
-            .and_hms_opt(1, 2, 32)
-            .expect("time")
-            .and_utc()
-            .timestamp();
+        let existing_timestamp = time::macros::datetime!(2025-01-02 01:02:32 UTC).unix_timestamp();
         let existing = QsoRecord {
             station_callsign: "K1ABC".to_string(),
             worked_callsign: "W1AW".to_string(),

@@ -1,6 +1,7 @@
 //! QSO entry form state and field navigation.
 
-use chrono::{DateTime, Utc};
+use qsoripper_core::utc;
+use time::OffsetDateTime;
 
 /// Band names in display order, used as ADIF band strings.
 pub(crate) const BANDS: &[&str] = &[
@@ -515,7 +516,7 @@ impl Default for LogForm {
 impl LogForm {
     /// Create a new form initialised with current UTC date/time and 20M/SSB defaults.
     pub(crate) fn new() -> Self {
-        let now = Utc::now();
+        let now = OffsetDateTime::now_utc();
         let mut form = Self {
             focused: Field::Callsign,
             field_selected: false,
@@ -527,8 +528,8 @@ impl LogForm {
             frequency_mhz: String::new(),
             rig_frequency_rx_hz: None,
             rig_band_rx: None,
-            date: now.format("%Y-%m-%d").to_string(),
-            time: now.format("%H:%M").to_string(),
+            date: utc::format_date(now),
+            time: utc::format_minutes(now),
             timestamp_automatic: true,
             time_off: String::new(),
             qth: String::new(),
@@ -598,20 +599,20 @@ impl LogForm {
 
     /// Refresh the automatic timestamp when the operator starts a new callsign.
     pub(crate) fn refresh_automatic_timestamp(&mut self) {
-        self.refresh_automatic_timestamp_at(Utc::now());
+        self.refresh_automatic_timestamp_at(OffsetDateTime::now_utc());
     }
 
-    fn refresh_automatic_timestamp_at(&mut self, now: DateTime<Utc>) {
+    fn refresh_automatic_timestamp_at(&mut self, now: OffsetDateTime) {
         if self.timestamp_automatic {
-            self.date = now.format("%Y-%m-%d").to_string();
-            self.time = now.format("%H:%M").to_string();
+            self.date = utc::format_date(now);
+            self.time = utc::format_minutes(now);
         }
     }
 
     /// Set an explicit QSO start timestamp that callsign entry must not replace.
-    pub(crate) fn set_explicit_timestamp(&mut self, now: DateTime<Utc>) {
-        self.date = now.format("%Y-%m-%d").to_string();
-        self.time = now.format("%H:%M").to_string();
+    pub(crate) fn set_explicit_timestamp(&mut self, now: OffsetDateTime) {
+        self.date = utc::format_date(now);
+        self.time = utc::format_minutes(now);
         self.timestamp_automatic = false;
     }
 
@@ -1629,9 +1630,7 @@ mod tests {
         let mut form = LogForm::new();
         form.date = "2020-01-02".to_string();
         form.time = "03:04".to_string();
-        let now = DateTime::parse_from_rfc3339("2026-08-19T02:30:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
+        let now = time::macros::datetime!(2026-08-19 02:30 UTC);
 
         form.refresh_automatic_timestamp_at(now);
 
@@ -1648,9 +1647,7 @@ mod tests {
         form.field_selected = true;
         form.insert_char_at_cursor('5');
         let edited_time = form.time.clone();
-        let now = DateTime::parse_from_rfc3339("2026-08-19T02:30:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
+        let now = time::macros::datetime!(2026-08-19 02:30 UTC);
 
         form.refresh_automatic_timestamp_at(now);
 

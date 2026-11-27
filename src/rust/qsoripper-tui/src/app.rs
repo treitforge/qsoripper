@@ -234,11 +234,11 @@ pub(crate) struct App {
 impl App {
     /// Create a new `App` targeting the given gRPC endpoint.
     pub(crate) fn new(endpoint: String) -> Self {
-        let now = chrono::Utc::now();
+        let now = time::OffsetDateTime::now_utc();
         Self {
             view: View::LogEntry,
             form: LogForm::new(),
-            utc_now: now.format("%Y-%m-%d %H:%M:%S").to_string(),
+            utc_now: qsoripper_core::utc::format_datetime(now),
             lookup_result: None,
             recent_qsos: Vec::new(),
             space_weather: None,
@@ -283,7 +283,7 @@ impl App {
     /// Acknowledge that a QSO is underway: start (or restart) the duration timer
     /// and snapshot the current UTC date/time into the form.
     pub(crate) fn acknowledge_qso_start(&mut self) {
-        let now = chrono::Utc::now();
+        let now = time::OffsetDateTime::now_utc();
         self.qso_started_at = Instant::now();
         self.qso_timer_active = true;
         self.form.set_explicit_timestamp(now);

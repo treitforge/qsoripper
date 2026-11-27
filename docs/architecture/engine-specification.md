@@ -439,6 +439,7 @@ Returns the current sync metadata state.
 **Behavior:**
 - Return live local and pending-upload counts plus `sync_metadata` values: QRZ QSO count, last sync timestamp, and logbook owner callsign.
 - Report `is_syncing`, `next_sync`, `auto_sync_enabled`, and `last_sync_error` from the live scheduler/sync lifecycle.
+- If the Rust scheduler cannot calculate `next_sync`, it clears that field and sets `last_sync_error`.
 - `auto_sync_enabled` is true only when periodic sync is enabled and a non-empty QRZ Logbook API key is available.
 - If no sync has ever occurred, return zero remote count and no last-sync timestamp.
 
@@ -1846,6 +1847,8 @@ The engine must start and function even when external integrations are unavailab
   - Windows uses a generic Windows Credential Manager record.
   - macOS uses a generic Keychain password record.
   - Linux uses the Secret Service API and the default collection.
+- The Rust engine selects each platform store through `keyring-core`.
+  Its Linux backend is `dbus-secret-service-keyring-store`, with encrypted sessions and bundled `libdbus`.
 - All conformant engines MUST use these logical identifiers:
   - Package: `com.treitforge.qsoripper`
   - Service: `qrz`

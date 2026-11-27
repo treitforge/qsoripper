@@ -479,8 +479,8 @@ async fn download_phase(
         metadata
             .last_sync
             .as_ref()
-            .and_then(|ts| chrono::DateTime::from_timestamp(ts.seconds, 0))
-            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .and_then(qsoripper_core::utc::from_timestamp)
+            .map(qsoripper_core::utc::format_date)
     };
 
     let remote_qsos = match fetch_remote_qsos_for_download(
@@ -1034,7 +1034,7 @@ async fn update_metadata(
     status_result: Result<QrzLogbookStatus, QrzLogbookError>,
     counters: &mut SyncCounters,
 ) {
-    let now = chrono::Utc::now();
+    let now = time::OffsetDateTime::now_utc();
 
     // Prefer the authoritative remote STATUS result (already fetched once
     // before the upload phase to avoid double-billing the QRZ API). If that
@@ -1071,7 +1071,7 @@ async fn update_metadata(
     let updated = SyncMetadata {
         qrz_qso_count,
         last_sync: Some(prost_types::Timestamp {
-            seconds: now.timestamp(),
+            seconds: now.unix_timestamp(),
             nanos: 0,
         }),
         qrz_logbook_owner,

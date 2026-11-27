@@ -85,6 +85,45 @@ The repository selects Rust through `rust-toolchain.toml`.
 
 ### Windows
 
+```
+# Windows
+winget install Rustlang.Rustup
+
+# Linux (Debian/Ubuntu)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+**.NET SDK 10** -- required for the .NET workspace under `src/dotnet/`, including the developer debug workbench and engine validation CLI:
+
+```
+# Windows
+winget install Microsoft.DotNet.SDK.10
+
+# Linux (Debian/Ubuntu)
+sudo apt install dotnet-sdk-10.0
+```
+
+The repository requires SDK `10.0.404` or a later .NET 10 SDK through `global.json`.
+This minimum includes the security update for the Native AOT compiler.
+To update an existing Windows installation, run:
+
+```powershell
+winget upgrade --id Microsoft.DotNet.SDK.10 --exact
+```
+
+**Node.js + npm** -- required for the repo-local Playwright tooling and for bootstrapping the local Terminalizer runtime used by terminal capture:
+
+```
+# Windows
+winget install OpenJS.NodeJS.LTS
+
+# Linux (Debian/Ubuntu)
+sudo apt install nodejs npm
+```
+
+Node 22 LTS is the safest default for local UI automation work. A newer globally installed Node is fine as long as `npm` is available. `capture-tui.ps1` bootstraps its own repo-local Node 22 runtime for Terminalizer.
+
+**PowerShell 7** -- required for the repo automation scripts under `scripts/`, including Avalonia and terminal capture:
 Install the tools in PowerShell.
 
 ```powershell

@@ -138,6 +138,21 @@ sudo dnf install protobuf-compiler
 
 **C compiler** -- required for the native FFI libraries under `src/c/`. On Windows, install the "Desktop development with C++" workload in Visual Studio or the [Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/). On Linux, `gcc` or `clang` is typically already available. Install with `sudo apt install build-essential` if needed. The `cc` crate finds the compiler automatically on both platforms.
 
+**CMake and CTest (Windows)** are required for the Win32 test suite. Use CMake 4.2 or later with Visual Studio 2026.
+
+```powershell
+winget install --id Kitware.CMake --exact
+```
+
+After installation, reopen your terminal. Run these commands in PowerShell before you run the build and test scripts. Both commands must show a version.
+
+```powershell
+cmake --version
+ctest --version
+```
+
+If you use the copy that comes with Visual Studio, run these commands and the repository scripts in Developer PowerShell for Visual Studio.
+
 **buf** (optional) -- for linting and breaking change detection on proto files:
 
 ```

@@ -5,7 +5,6 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use chrono::NaiveDate;
 use prost_types::Timestamp;
 use reqwest::{header::HeaderMap, Client, Request};
 use serde::Deserialize;
@@ -1056,23 +1055,17 @@ fn parse_yes_no(value: Option<&str>) -> Option<bool> {
 }
 
 fn parse_date_timestamp(value: Option<&str>) -> Option<Timestamp> {
-    let date = NaiveDate::parse_from_str(value?.trim(), "%Y-%m-%d").ok()?;
-    let date_time = date.and_hms_opt(0, 0, 0)?;
-    let nanos = i32::try_from(date_time.and_utc().timestamp_subsec_nanos()).ok()?;
-    Some(Timestamp {
-        seconds: date_time.and_utc().timestamp(),
-        nanos,
-    })
+    let date = crate::utc::parse_date(value?.trim()).ok()?;
+    Some(crate::utc::to_timestamp(date.midnight().assume_utc()))
 }
 
 fn parse_datetime_timestamp(value: Option<&str>) -> Option<Timestamp> {
-    let date_time =
-        chrono::NaiveDateTime::parse_from_str(value?.trim(), "%Y-%m-%d %H:%M:%S").ok()?;
-    let nanos = i32::try_from(date_time.and_utc().timestamp_subsec_nanos()).ok()?;
-    Some(Timestamp {
-        seconds: date_time.and_utc().timestamp(),
-        nanos,
-    })
+    let date_time = time::PrimitiveDateTime::parse(
+        value?.trim(),
+        time::macros::format_description!("[year]-[month padding:none]-[day padding:none] [hour padding:none]:[minute padding:none]:[second padding:none]"),
+    )
+    .ok()?;
+    Some(crate::utc::to_timestamp(date_time.assume_utc()))
 }
 
 fn parse_bio_length(value: Option<&str>) -> Option<u32> {

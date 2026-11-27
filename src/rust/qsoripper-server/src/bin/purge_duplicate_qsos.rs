@@ -5,11 +5,11 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use chrono::{DateTime, Utc};
 use prost_types::Timestamp;
 use qsoripper_core::proto::qsoripper::domain::{QsoRecord, SyncStatus};
 use qsoripper_core::storage::{LogbookStore, QsoListQuery};
 use qsoripper_storage_sqlite::SqliteStorageBuilder;
+use time::OffsetDateTime;
 
 #[derive(Debug)]
 struct Options {
@@ -162,9 +162,9 @@ fn parse_i64(flag: &str, value: &str) -> Result<i64, String> {
 }
 
 fn parse_datetime_ms(value: &str) -> Result<i64, String> {
-    DateTime::parse_from_rfc3339(value)
+    OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
         .map_err(|err| format!("'{value}' is not an RFC3339 timestamp: {err}"))
-        .map(|dt| dt.timestamp_millis())
+        .map(|dt| (dt.unix_timestamp() * 1_000) + i64::from(dt.millisecond()))
 }
 
 fn help_text() -> String {
@@ -467,7 +467,12 @@ fn create_backup(options: &Options) -> Result<PathBuf, String> {
 }
 
 fn default_backup_path(db_path: &Path) -> PathBuf {
-    let stamp = Utc::now().format("%Y%m%d-%H%M%S");
+    let now = OffsetDateTime::now_utc();
+    let stamp = format!(
+        "{}-{}",
+        qsoripper_core::utc::format_adif_date(now),
+        qsoripper_core::utc::format_adif_time(now)
+    );
     let file_name = db_path
         .file_name()
         .and_then(|name| name.to_str())
@@ -480,11 +485,7 @@ fn escape_sql_path(path: &Path) -> String {
 }
 
 fn now_timestamp() -> Timestamp {
-    let now = Utc::now();
-    Timestamp {
-        seconds: now.timestamp(),
-        nanos: i32::try_from(now.timestamp_subsec_nanos()).unwrap_or(0),
-    }
+    qsoripper_core::utc::to_timestamp(OffsetDateTime::now_utc())
 }
 
 fn print_group(index: usize, group: &CandidateGroup) {

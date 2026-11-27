@@ -18,7 +18,7 @@ crossterm = "0.28"
 tonic = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
 prost-types = { workspace = true }
-chrono = "0.4"
+time = { workspace = true }
 anyhow = "1"
 
 [lints]

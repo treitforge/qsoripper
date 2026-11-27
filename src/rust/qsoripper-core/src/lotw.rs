@@ -3,10 +3,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::Utc;
 use prost_types::Timestamp;
 use reqwest::{Client, Url};
 use tempfile::TempDir;
+use time::OffsetDateTime;
 use tokio::process::Command;
 
 use crate::adif::{parse_adi_qsos, serialize_adi_qsos};
@@ -673,11 +673,7 @@ fn sanitized_process_detail(stderr: &[u8], stdout: &[u8], secrets: &[&str]) -> S
 }
 
 fn timestamp_now() -> Timestamp {
-    let now = Utc::now();
-    Timestamp {
-        seconds: now.timestamp(),
-        nanos: i32::try_from(now.timestamp_subsec_nanos()).unwrap_or(i32::MAX),
-    }
+    crate::utc::to_timestamp(OffsetDateTime::now_utc())
 }
 
 fn saturating_u32(value: usize) -> u32 {

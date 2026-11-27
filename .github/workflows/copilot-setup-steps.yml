@@ -52,7 +52,7 @@ jobs:
 
       - name: Install Rust quality tooling
         run: |
-          cargo install cargo-deny --locked
+          cargo install cargo-deny --version 0.20.2 --locked
 
       - name: Verify key developer tools
         run: |

@@ -5,11 +5,11 @@ use crate::application::logbook::{
     AdifImportDiagnostic, AdifImportSummary, LogbookEngine, LogbookError,
 };
 use crate::proto::qsoripper::domain::{QsoRecord, StationProfile};
-use chrono::{DateTime, SecondsFormat, Utc};
 #[cfg(test)]
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
+use time::OffsetDateTime;
 
 const WSJTX_MAGIC: u32 = 0xadbc_cbda;
 const WSJTX_LOGGED_ADIF_MESSAGE_TYPE: u32 = 12;
@@ -242,7 +242,7 @@ async fn ingest_adif_payload(
         return Ok(AdifImportSummary::default());
     }
 
-    let imported_at = Utc::now();
+    let imported_at = OffsetDateTime::now_utc();
     for qso in &mut qsos {
         qso.extra_fields.insert(
             WSJTX_IMPORT_DIAGNOSTIC_FIELD.to_string(),
@@ -263,23 +263,15 @@ async fn ingest_adif_payload(
     .map_err(format_wsjtx_error)
 }
 
-fn wsjtx_import_note(source: &str, qso: &QsoRecord, imported_at: DateTime<Utc>) -> String {
-    let imported_at_text = imported_at.to_rfc3339_opts(SecondsFormat::Millis, true);
+fn wsjtx_import_note(source: &str, qso: &QsoRecord, imported_at: OffsetDateTime) -> String {
+    let imported_at_text = crate::utc::format_rfc3339_millis(imported_at);
     let end_delta = qso
         .utc_end_timestamp
         .as_ref()
-        .and_then(|timestamp| {
-            let nanos = u32::try_from(timestamp.nanos).ok()?;
-            DateTime::from_timestamp(timestamp.seconds, nanos)
-        })
+        .and_then(crate::utc::from_timestamp)
         .map_or_else(
             || "unavailable".to_string(),
-            |qso_end| {
-                imported_at
-                    .signed_duration_since(qso_end)
-                    .num_milliseconds()
-                    .to_string()
-            },
+            |qso_end| (imported_at - qso_end).whole_milliseconds().to_string(),
         );
     format!(
         "{WSJTX_IMPORT_DIAGNOSTIC_PREFIX} imported_at_utc={imported_at_text}, qso_end_to_import_ms={end_delta}, source={source}, engine=rust"
@@ -631,8 +623,8 @@ mod tests {
             }),
             ..QsoRecord::default()
         };
-        let imported_at =
-            chrono::DateTime::from_timestamp(100, 500_000_000).expect("import timestamp");
+        let imported_at = time::OffsetDateTime::from_unix_timestamp_nanos(100_500_000_000)
+            .expect("import timestamp");
 
         let note = wsjtx_import_note(WSJTX_UDP_SOURCE, &qso, imported_at);
 

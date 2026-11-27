@@ -80,92 +80,27 @@ QsoRipper uses ADIF **only at the edges** for QRZ API calls and file I/O. Intern
 
 ## Getting Started
 
-### Prerequisites
+The repository selects Rust through `rust-toolchain.toml`.
+`global.json` sets .NET SDK 10.0.100 as the minimum and permits roll-forward.
 
-**Rust toolchain** -- install via [rustup](https://rustup.rs/):
+### Windows
 
-```
-# Windows
-winget install Rustlang.Rustup
-
-# Linux (Debian/Ubuntu)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-**.NET SDK 10** -- required for the .NET workspace under `src/dotnet/`, including the developer debug workbench and engine validation CLI:
-
-```
-# Windows
-winget install Microsoft.DotNet.SDK.10
-
-# Linux (Debian/Ubuntu)
-sudo apt install dotnet-sdk-10.0
-```
-
-The repository pins SDK `10.0.201` in `global.json`.
-
-**Node.js + npm** -- required for the repo-local Playwright tooling and for bootstrapping the local Terminalizer runtime used by terminal capture:
-
-```
-# Windows
-winget install OpenJS.NodeJS.LTS
-
-# Linux (Debian/Ubuntu)
-sudo apt install nodejs npm
-```
-
-Node 22 LTS is the safest default for local UI automation work. A newer globally installed Node is fine as long as `npm` is available. `capture-tui.ps1` bootstraps its own repo-local Node 22 runtime for Terminalizer.
-
-**PowerShell 7** -- required for the repo automation scripts under `scripts/`, including Avalonia and terminal capture:
+Install the tools in PowerShell.
 
 ```powershell
-# Windows
+winget install Rustlang.Rustup
+winget install Microsoft.DotNet.SDK.10
 winget install Microsoft.PowerShell
-```
-
-**Protocol Buffers compiler** -- needed to generate gRPC code from proto files:
-
-```
-# Windows
 winget install Google.Protobuf
-
-# Linux (Debian/Ubuntu)
-sudo apt install protobuf-compiler
-
-# Linux (Fedora)
-sudo dnf install protobuf-compiler
+winget install --id Kitware.CMake --exact
 ```
 
-**C compiler** -- required for the native FFI libraries under `src/c/`. On Windows, install the "Desktop development with C++" workload in Visual Studio or the [Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/). On Linux, `gcc` or `clang` is typically already available. Install with `sudo apt install build-essential` if needed. The `cc` crate finds the compiler automatically on both platforms.
+Install the **Desktop development with C++** workload in Visual Studio or [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+The Win32 tests need CMake and CTest. Use CMake 4.2 or later with Visual Studio 2026.
+Open PowerShell 7. Check `protoc --version`, `cmake --version`, and `ctest --version`.
+Use Developer PowerShell if you use the tools that come with Visual Studio.
 
-**buf** (optional) -- for linting and breaking change detection on proto files:
-
-```
-# Windows
-winget install Bufbuild.Buf
-
-# Linux
-# See https://buf.build/docs/installation
-```
-
-**cppcheck** (optional, recommended for Win32 work) -- enables extra static analysis for `src\c\qsoripper-win32` when you run `.\build.ps1` or configure the CMake project:
-
-```
-# Windows
-winget install Cppcheck.Cppcheck
-
-# Linux (Debian/Ubuntu)
-sudo apt install cppcheck
-
-# Linux (Fedora)
-sudo dnf install cppcheck
-```
-
-If `cppcheck` is not installed, `.\build.ps1` still builds the Win32 app and skips only that extra analysis step.
-
-### Build and Test
-
-**Repository build script:**
+Run these commands from the repository root.
 
 ```powershell
 .\build.ps1
@@ -175,77 +110,73 @@ If `cppcheck` is not installed, `.\build.ps1` still builds the Win32 app and ski
 .\build-and-test.ps1
 ```
 
-By default, `.\build.ps1` builds the Rust workspace in **Release**, publishes the Native AOT CLI to `artifacts\publish\qsoripper-cli\Release\`, and publishes the desktop GUI to `artifacts\publish\qsoripper-gui\Release\`. Use `-Configuration Debug` to switch the Rust build and both .NET publish outputs to `Debug`.
+The build uses Release by default and writes the published apps to `artifacts/publish/`.
+Install Pester with `Install-Module Pester -Scope CurrentUser` to include the PowerShell tests.
+Optional tools include [Buf](https://buf.build/docs/installation) for protobuf checks and Cppcheck for Win32 analysis (`winget install Cppcheck.Cppcheck`).
+Create `$env:APPDATA\qsoripper` before first-run setup if you use the default logbook path.
 
-Use `.\test.ps1` to run the Rust, .NET, Win32 CTest, and Pester suites. This command does not run the additional gates from `.\build.ps1 check`. Use `.\build-and-test.ps1` when you want to build first and then run the full test script. Local Win32 CMake tests prefer Visual Studio Build Tools 2026 (`Visual Studio 18 2026`). They use Visual Studio 2022 (`Visual Studio 17 2022`) when Build Tools 2026 are not available.
+### Ubuntu 26.04
 
-For engine-neutral local validation, use the split checks plus the shared conformance harness:
+These commands were tested on x86-64. Omit `sudo` in a container where you run as root.
 
-```powershell
-.\build.ps1 check-dotnet
-.\build.ps1 check-rust
-.\tests\Run-EngineConformance.ps1
+```sh
+sudo apt update
+sudo apt install --no-install-recommends ca-certificates curl build-essential protobuf-compiler libprotobuf-dev dotnet-sdk-10.0
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+. "$HOME/.cargo/env"
 ```
 
-The conformance harness runs the common CLI slice against both built-in engine hosts so cross-language engine behavior stays aligned at the gRPC/protobuf seam.
+From the repository root, build and test the workspaces directly.
 
-**Rust engine:**
-
-```
-cd src/rust
-cargo build
-cargo test
-```
-
-This compiles the C libraries via FFI, generates Rust types from the proto files, and builds the engine. All tests (unit + integration) run with `cargo test`.
-
-### UI inspection and automation setup
-
-The repo now includes three developer-facing UX inspection lanes:
-
-- **Web** screenshots and diffs with Playwright
-- **Avalonia desktop** deterministic capture plus Windows UI automation
-- **Terminal** workflow capture to GIF/transcript via a repo-local Terminalizer runtime (**Windows-only** today)
-- **Terminal/TUI live automation** through a repo-local PTY harness with JSON action scripts and screen snapshots
-
-One-time setup after cloning:
-
-```powershell
-npm install
-npx playwright install chromium
+```sh
+cargo build --manifest-path src/rust/Cargo.toml
+cargo test --manifest-path src/rust/Cargo.toml
+dotnet build src/dotnet/QsoRipper.slnx
+dotnet test src/dotnet/QsoRipper.slnx --no-build
 ```
 
-- `npm install` restores the root TypeScript and Playwright tooling used by `scripts\capture-web.ts` and `scripts\capture-web-diff.ts`.
-- The same repo-local Node toolchain now also drives `scripts\drive-tui.ts`, browser-rendered terminal snapshots, and the sample terminal fixture used for TUI automation smoke coverage.
-- `npx playwright install chromium` installs the browser binary used for web captures.
-- `scripts\capture-tui.ps1` is currently **Windows-only**. It does **not** require a global Terminalizer install. On first run it bootstraps a repo-local Node 22 + Terminalizer runtime under `tools\terminalizer-bootstrap\` and `tools\terminalizer-runtime\`.
-- `scripts\drive-avalonia.ps1` is **Windows-only** and needs an interactive desktop session because it uses Windows UI Automation APIs. It does not require WinAppDriver.
+Run the tests before you start the engines. The Rust FFI tests skip live checks when no engine is available.
+To run the live checks, first configure a station profile on the engine.
+Install [PowerShell 7](https://learn.microsoft.com/en-us/powershell/scripting/install/install-ubuntu) for the repository helpers.
+Run `pwsh -File tests/Run-EngineConformance.ps1` with both engine ports free to test both implementations.
 
-Common entry points:
+For the Avalonia desktop, install the X11 libraries and fonts.
 
-```powershell
-# Web capture / diff
+```sh
+sudo apt install --no-install-recommends libx11-6 libice6 libsm6 libfontconfig1 fonts-dejavu-core
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/qsoripper"
+```
+
+The setup wizard needs this directory for the default logbook path.
+Use the [launch commands below](#direct-launch) for both engines and Avalonia.
+In a container without a display, install `xvfb` and `xauth`. Prefix the GUI command with `xvfb-run -a`.
+To build the optional CW decoder, install `pkg-config` and `libasound2-dev` before you run `pwsh -File build.ps1 cw-decoder`.
+
+### UI inspection and automation
+
+Install Node.js 22 or newer and npm for web captures and TUI screenshots.
+On Windows, use `winget install OpenJS.NodeJS.LTS`.
+On Ubuntu, use `sudo apt install --no-install-recommends nodejs npm`.
+From the repository root, run `npm ci`.
+
+Install Chromium with `npx playwright install chromium` on Windows.
+On Ubuntu, use `npx playwright install --with-deps chromium` to also install the system libraries.
+
+```
 npm run ux:capture:web -- --scenario debughost-home --launch-debughost
-npm run ux:diff:web -- --scenario debughost-home --launch-debughost
-
-# Deterministic Avalonia capture
-.\scripts\capture-avalonia.ps1 -Scenario main-window
-
-# Windows UI automation against the live Avalonia window
-.\scripts\drive-avalonia.ps1 -ActionScript .\scripts\automation\avalonia-main-window-smoke.json
-
-# Cross-platform terminal/TUI automation against the sample fixture
-npm run ux:drive:tui -- --action-script .\scripts\automation\tui-sample-smoke.json
-
-# Terminal workflow capture (Windows-only today)
-.\scripts\capture-tui.ps1 -Scenario cli-help
+npm run ux:drive:tui -- --action-script scripts/automation/tui-sample-smoke.json
 ```
 
-The tools write artifacts under `artifacts\ux\current\`, `artifacts\ux\baseline\`, and `artifacts\ux\diff\`.
+To create a web baseline, run `npm run ux:diff:web -- --scenario debughost-home --launch-debughost --update-baseline`.
+Remove `--update-baseline` to compare a new capture with the saved baseline.
 
-For the full dependency matrix and per-lane setup notes, see `docs\development\ui-inspection.md`.
+Use `scripts/capture-avalonia.ps1` for fixture screenshots on Windows.
+Windows also supports live Avalonia automation and Terminalizer recordings.
+See the [UI inspection guide](docs/development/ui-inspection.md).
 
-**Interactive launcher TUI (recommended for mixed engine + UI startup):**
+### Interactive launcher
+
+On Windows, run the launcher from the repository root.
 
 ```powershell
 .\launcher.ps1
@@ -268,15 +199,15 @@ Press `Enter` to start the selected items.
 Press `S` to stop launcher-managed processes.
 
 Selections persist below `[launcher]` in `config.toml`.
-Run `.\build.ps1` first for QsoRipper artifacts.
+On Windows, run `.\build.ps1` first to publish the apps.
 The PowerShell wrapper validates a sibling CatHub build on each start.
 It builds CatHub when the sibling executable is missing or incompatible.
 
-**Local engine launcher (recommended):**
+### Local engine launcher
 
 ```powershell
-.\start-qsoripper.ps1 -Engine local-rust
-.\start-qsoripper.ps1 -Engine local-dotnet
+pwsh -File ./start-qsoripper.ps1 -Engine local-rust
+pwsh -File ./start-qsoripper.ps1 -Engine local-dotnet
 ```
 
 Built-in local profiles:
@@ -295,30 +226,38 @@ It records process state and output logs below `artifacts\run\`.
 
 Thus, both local profiles can run on their default ports.
 
-**Direct engine host launch:**
+### Direct launch
 
-Rust engine:
-
-```
-cd src/rust
-cargo run -p qsoripper-server
-```
-
-.NET engine:
+From the repository root, run each engine you want in a separate terminal.
 
 ```
-dotnet run --project src/dotnet/QsoRipper.Engine.DotNet/QsoRipper.Engine.DotNet.csproj
+cargo run --manifest-path src/rust/Cargo.toml -p qsoripper-server --bin qsoripper-server
+dotnet run --project src/dotnet/QsoRipper.Engine.DotNet
 ```
 
-Those start the built-in engine hosts directly. The Rust host defaults to `127.0.0.1:50051`. The .NET host defaults to `127.0.0.1:50052`.
+Rust listens on port 50051. .NET listens on port 50052.
+Wait for the engine to start. In another terminal, start the Avalonia GUI.
+
+```
+dotnet run --project src/dotnet/QsoRipper.Gui
+```
+
+Complete first-run setup to log QSOs. Use the **Tools** menu to switch engines.
+
+On Ubuntu, use the same GUI project to capture a fixture screenshot.
+Prefix the command with `xvfb-run -a` if there is no display.
+
+```sh
+dotnet run --project src/dotnet/QsoRipper.Gui -- --capture --capture-output artifacts/ux/current/main-window.png
+```
 
 The server can now swap storage implementations at startup:
 
 ```powershell
 cd src\rust
-cargo run -p qsoripper-server -- --storage memory
-cargo run -p qsoripper-server -- --storage sqlite --sqlite-path .\data\qsoripper.db
-cargo run -p qsoripper-server -- --config .\config\qsoripper.toml
+cargo run -p qsoripper-server --bin qsoripper-server -- --storage memory
+cargo run -p qsoripper-server --bin qsoripper-server -- --storage sqlite --sqlite-path .\data\qsoripper.db
+cargo run -p qsoripper-server --bin qsoripper-server -- --config .\config\qsoripper.toml
 ```
 
 Equivalent environment variables are also supported:
@@ -327,7 +266,7 @@ Equivalent environment variables are also supported:
 $env:QSORIPPER_STORAGE_BACKEND = "sqlite"
 $env:QSORIPPER_SQLITE_PATH = ".\data\qsoripper.db"
 $env:QSORIPPER_CONFIG_PATH = ".\config\qsoripper.toml"
-cargo run -p qsoripper-server
+cargo run -p qsoripper-server --bin qsoripper-server
 ```
 
 When no explicit config override is provided, the server uses a persisted setup file at:
@@ -426,10 +365,10 @@ The repo also includes a first-class PTY-backed terminal automation lane for int
   - `*.ansi.txt` - serialized ANSI screen content
 - Every run also writes `transcript.txt` plus `report.json`.
 
-Today's built-in fixture is `sample-tui`, a deterministic menu/filter/list/details demo used to validate the harness before a production TUI exists.
+The `sample-tui` fixture tests menu, filter, list, and detail views.
 
 ```powershell
-npm run ux:drive:tui -- --action-script .\scripts\automation\tui-sample-smoke.json
+npm run ux:drive:tui -- --action-script scripts/automation/tui-sample-smoke.json
 ```
 
 Use `scripts\capture-tui.ps1` when you specifically want a rendered GIF. Use `scripts\drive-tui.ts` when you need repeatable interactive input, screen-state assertions, and step-by-step screen artifacts with rendered PNG snapshots.
@@ -578,7 +517,7 @@ dotnet build QsoRipper.slnx
 dotnet test QsoRipper.slnx
 ```
 
-This builds the shared .NET workspace, including the developer debug host and the CLI project used for engine validation over gRPC. To publish the Native AOT CLI from the repository root, use `.\build.ps1` or `.\build.ps1 dotnet`.
+This builds the .NET engine, GUI, CLI, and DebugHost.
 
 ### Code Coverage
 
@@ -653,7 +592,7 @@ dotnet run --project QsoRipper.Cli -- enrich --apply --after 2026-08-01T00:00:00
 dotnet run --project QsoRipper.Cli -- import-cabrillo contest.log
 ```
 
-Or publish the Native AOT build and run the produced executable:
+On Windows, publish and run the Native AOT CLI.
 
 ```powershell
 .\build.ps1 dotnet

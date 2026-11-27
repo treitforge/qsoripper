@@ -3,7 +3,7 @@ name: Full-Stack Quality
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * *'  # Daily at 08:00 UTC
+    - cron: '17 8 * * 1'  # Weekly on Monday at 08:17 UTC
 
 permissions:
   contents: read

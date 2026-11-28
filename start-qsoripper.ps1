@@ -194,9 +194,22 @@ function Get-LogTail([string]$Path) {
     return Get-Content -LiteralPath $Path -Tail 20
 }
 
+function Test-ProcessStopped([int]$ProcessId) {
+    if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
+        return $true
+    }
+
+    if ($IsLinux) {
+        # An exited process can keep its PID until its parent reaps it.
+        $status = Get-Content -LiteralPath "/proc/$ProcessId/stat" -Raw -ErrorAction SilentlyContinue
+        return $status -match '(?s)^\d+ \(.*\) Z '
+    }
+
+    return $false
+}
+
 function Stop-TrackedProcess([int]$ProcessId) {
-    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-    if ($null -eq $process) {
+    if (Test-ProcessStopped -ProcessId $ProcessId) {
         return
     }
 
@@ -204,7 +217,7 @@ function Stop-TrackedProcess([int]$ProcessId) {
 
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
         Start-Sleep -Milliseconds 200
-        if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
+        if (Test-ProcessStopped -ProcessId $ProcessId) {
             return
         }
     }
@@ -283,6 +296,11 @@ function Get-ListeningProcessIds([object[]]$Targets) {
 }
 
 function Test-LikelyQsoRipperProcess([pscustomobject]$Profile, [int]$ProcessId) {
+    if ($IsLinux) {
+        $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        return $null -ne $process -and (Test-LinuxQsoRipperEngine -Profile $Profile -Process $process)
+    }
+
     $commandLine = Get-ProcessCommandLine -ProcessId $ProcessId
     if ([string]::IsNullOrWhiteSpace($commandLine)) {
         return $false
@@ -316,6 +334,28 @@ function Test-LikelyQsoRipperProcess([pscustomobject]$Profile, [int]$ProcessId) 
     return $false
 }
 
+function Test-LinuxQsoRipperEngine([pscustomobject]$Profile, [System.Diagnostics.Process]$Process) {
+    try {
+        $executable = [System.IO.Path]::GetFileName($Process.Path)
+        if ($Profile.EngineId -eq 'rust-tonic') {
+            return $executable -ceq 'qsoripper-server'
+        }
+        if ($executable -ceq 'QsoRipper.Engine.DotNet') {
+            return $true
+        }
+        if ($executable -cne 'dotnet') {
+            return $false
+        }
+
+        # Match the assembly argument, never text embedded in a shell command.
+        $arguments = [System.IO.File]::ReadAllText("/proc/$($Process.Id)/cmdline").Split("`0")
+        return [System.IO.Path]::GetFileName($arguments[1]) -ceq 'QsoRipper.Engine.DotNet.dll'
+    }
+    catch {
+        return $false
+    }
+}
+
 function Get-ProcessCommandLine([int]$ProcessId) {
     if ($IsWindows) {
         return (Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue).CommandLine
@@ -344,6 +384,12 @@ function Get-UntrackedEngineProcesses {
         [pscustomobject]$Profile,
         [int]$TrackedProcessId = 0
     )
+
+    if ($IsLinux) {
+        return @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Id -ne $TrackedProcessId -and (Test-LinuxQsoRipperEngine -Profile $Profile -Process $_)
+        } | Sort-Object Id)
+    }
 
     $fragments = [System.Collections.Generic.List[string]]::new()
     if (-not [string]::IsNullOrWhiteSpace($Profile.LaunchFilePath) -and $Profile.LaunchFilePath -notin @('cargo', 'dotnet')) {

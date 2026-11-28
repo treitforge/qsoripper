@@ -269,6 +269,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn win32_plan_has_no_engine_env() {
         use crate::catalog::UI_WIN32;
         let sel = Selection::default_preset();

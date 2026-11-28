@@ -156,6 +156,7 @@ pub(crate) const UI_GUI: ComponentId = "gui";
 pub(crate) const UI_DEBUGHOST: ComponentId = "debughost";
 pub(crate) const UI_TUI: ComponentId = "tui";
 pub(crate) const UI_CWSCOPE: ComponentId = "cwscope";
+#[cfg(any(windows, test))]
 pub(crate) const UI_WIN32: ComponentId = "win32";
 
 /// Static list of every component the launcher manages.
@@ -228,6 +229,7 @@ pub(crate) fn catalog() -> Vec<ComponentSpec> {
             wants_console: false,
             artifact: bundled_artifact("cw-decoder-gui", "CwDecoderGui"),
         },
+        #[cfg(windows)]
         ComponentSpec {
             id: UI_WIN32,
             display_name: "Win32 GUI (qsoripper-win32)",
@@ -261,8 +263,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn win32_ui_is_in_catalog() {
-        let spec = find(UI_WIN32).expect("win32 ui in catalog");
+    fn win32_ui_requires_windows() {
+        let spec = find(UI_WIN32);
+        if !cfg!(windows) {
+            assert!(spec.is_none());
+            return;
+        }
+        let spec = spec.expect("win32 ui in catalog on Windows");
         assert_eq!(spec.kind, ComponentKind::Ui);
         assert!(!spec.wants_console);
         assert!(!spec.engine_bindable);

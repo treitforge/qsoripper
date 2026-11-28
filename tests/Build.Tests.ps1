@@ -66,6 +66,125 @@ function global:Assert-BuildEquals($Actual, $Expected) {
     }
 }
 
+Describe 'Linux build and launch scripts' {
+    It 'skips the Win32 cross-build when its tools are missing' -Skip:(-not $IsLinux) {
+        $repo = Split-Path -Parent $PSScriptRoot
+        $pwsh = (Get-Process -Id $PID).Path
+        $savedPath = $env:PATH
+        try {
+            $env:PATH = $TestDrive
+            $output = & $pwsh -NoProfile -File (Join-Path $repo 'build.ps1') win32
+        }
+        finally {
+            $env:PATH = $savedPath
+        }
+        Assert-BuildEquals $LASTEXITCODE 0
+        Assert-BuildMatches ($output -join "`n") 'Skipping Win32 cross-build: cmake is missing'
+    }
+
+    It 'publishes a Windows executable in the requested configuration' -Skip:(-not $IsLinux -or
+        @(Get-Command cmake, make, x86_64-w64-mingw32-gcc, x86_64-w64-mingw32-windres -CommandType Application -ErrorAction SilentlyContinue).Count -lt 4) {
+        $repo = Split-Path -Parent $PSScriptRoot
+        $pwsh = (Get-Process -Id $PID).Path
+        $sourceRoot = Join-Path $TestDrive 'src' 'c'
+        $null = New-Item -ItemType Directory -Path $sourceRoot -Force
+        Copy-Item (Join-Path $repo 'build.ps1') $TestDrive
+        Copy-Item (Join-Path $repo 'src' 'c' 'qsoripper-win32') $sourceRoot -Recurse
+
+        & $pwsh -NoProfile -File (Join-Path $TestDrive 'build.ps1') win32 -Configuration Debug
+
+        Assert-BuildEquals $LASTEXITCODE 0
+        $exe = Join-Path $TestDrive 'artifacts' 'publish' 'qsoripper-win32' 'Debug' 'qsoripper-win32.exe'
+        $stream = [System.IO.File]::OpenRead($exe)
+        try {
+            Assert-BuildEquals $stream.ReadByte() 77
+            Assert-BuildEquals $stream.ReadByte() 90
+        }
+        finally {
+            $stream.Dispose()
+        }
+    }
+
+    It 'selects debug artifacts and forwards arguments to the launcher' -Skip:(-not $IsLinux) {
+        $repo = Split-Path -Parent $PSScriptRoot
+        $pwsh = (Get-Process -Id $PID).Path
+        $scripts = Join-Path $TestDrive 'scripts'
+        $debug = Join-Path $TestDrive 'src' 'rust' 'target' 'debug'
+        $null = New-Item -ItemType Directory -Path $scripts, $debug -Force
+        Copy-Item (Join-Path $repo 'launcher.ps1') $TestDrive
+        Copy-Item (Join-Path $repo 'scripts' 'Initialize-DotnetRoot.ps1') $scripts
+        Copy-Item (Join-Path $repo 'scripts' 'CatHubBootstrap.ps1') $scripts
+        $launcher = Join-Path $debug 'qsoripper-launcher'
+        @('#!/bin/sh', 'printf ''%s\n'' "$*"') | Set-Content -LiteralPath $launcher
+        & chmod +x $launcher
+        Assert-BuildEquals $LASTEXITCODE 0
+        $output = & $pwsh -NoProfile -File (Join-Path $TestDrive 'launcher.ps1') -Dev --help
+        Assert-BuildEquals $LASTEXITCODE 0
+        Assert-BuildEquals ($output -join "`n") '--debug --help'
+    }
+
+    It 'leaves the engine controls alone with NoEngines' {
+        $repo = Split-Path -Parent $PSScriptRoot
+        $pwsh = (Get-Process -Id $PID).Path
+        $scripts = Join-Path $TestDrive 'scripts'
+        $null = New-Item -ItemType Directory -Path $scripts -Force
+        Copy-Item (Join-Path $repo 'runall.ps1') $TestDrive
+        Copy-Item (Join-Path $repo 'scripts' 'Initialize-DotnetRoot.ps1') $scripts
+        $engineStub = 'Set-Content (Join-Path $PSScriptRoot "engine-called") "Unexpected engine control"'
+        Set-Content (Join-Path $TestDrive 'stop-qsoripper.ps1') $engineStub
+        Set-Content (Join-Path $TestDrive 'start-qsoripper.ps1') $engineStub
+
+        $null = & $pwsh -NoProfile -File (Join-Path $TestDrive 'runall.ps1') -SkipBuild -NoEngines -NoGui -NoDebugHost -NoCwScope
+
+        Assert-BuildEquals $LASTEXITCODE 0
+        Assert-BuildEquals (Test-Path (Join-Path $TestDrive 'engine-called')) $false
+    }
+
+    It 'does not identify a shell that mentions the Rust binary as an engine' -Skip:(-not $IsLinux) {
+        $repo = Split-Path -Parent $PSScriptRoot
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $repo 'start-qsoripper.ps1'), [ref]$null, [ref]$null)
+        $function = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Test-LinuxQsoRipperEngine'
+        }, $false)
+        . ([scriptblock]::Create($function.Extent.Text))
+        $shell = Start-Process sh -ArgumentList '-c', "'sleep 1; : qsoripper-server'" -PassThru
+        try {
+            Assert-BuildEquals (Test-LinuxQsoRipperEngine ([pscustomobject]@{ EngineId = 'rust-tonic' }) $shell) $false
+        }
+        finally {
+            $null = $shell.WaitForExit(5000)
+        }
+    }
+
+    It 'finishes stopping a Rust engine when its parent has not reaped it' -Skip:(-not $IsLinux) {
+        $repo = Split-Path -Parent $PSScriptRoot
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $repo 'start-qsoripper.ps1'), [ref]$null, [ref]$null)
+        foreach ($definition in $ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -in @('Test-ProcessStopped', 'Stop-TrackedProcess')
+        }, $false)) {
+            . ([scriptblock]::Create($definition.Extent.Text))
+        }
+
+        $script:EngineProcessState = 'S'
+        Mock Get-Process { [pscustomobject]@{ Id = 123 } } -ParameterFilter { $Id -eq 123 }
+        Mock Get-Content { "123 (qsoripper-serve) $script:EngineProcessState 1" } -ParameterFilter {
+            $LiteralPath -eq '/proc/123/stat'
+        }
+        Mock Stop-Process { $script:EngineProcessState = 'Z' } -ParameterFilter { $Id -eq 123 }
+        Mock Start-Sleep {}
+        Stop-TrackedProcess -ProcessId 123
+        Stop-TrackedProcess -ProcessId 123
+        Should -Invoke Stop-Process -Times 1 -Exactly
+        Should -Invoke Start-Sleep -Times 1 -Exactly
+    }
+}
+
 Describe 'build.ps1 Check-Rust CI parity (Bug #202)' {
 
     It 'runs tests with coverage via cargo-llvm-cov when available' {

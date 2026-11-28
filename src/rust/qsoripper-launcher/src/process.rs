@@ -153,12 +153,11 @@ where
     #[cfg(not(windows))]
     {
         use std::os::unix::process::CommandExt;
-        let (terminal, terminal_args) = pick_terminal();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let (terminal, terminal_args) = pick_terminal(&path);
 
         let mut cmd = Command::new(terminal);
-        for a in terminal_args {
-            cmd.arg(a);
-        }
+        cmd.args(terminal_args);
         cmd.arg(exe);
         cmd.args(args);
         if let Some(dir) = exe.parent() {
@@ -185,11 +184,13 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 }
 
 #[cfg(not(windows))]
-fn pick_terminal() -> (&'static str, Vec<&'static str>) {
+fn pick_terminal(path: &OsStr) -> (&'static str, &'static [&'static str]) {
     // Probe a short list of well-known terminal emulators. We pick the first
     // one on PATH; user can override by symlinking `x-terminal-emulator`.
+    const PTYXIS_ARGS: &[&str] = &["--standalone", "--new-window", "--"];
     const CANDIDATES: &[(&str, &[&str])] = &[
         ("x-terminal-emulator", &["-e"]),
+        ("ptyxis", PTYXIS_ARGS),
         ("gnome-terminal", &["--"]),
         ("konsole", &["-e"]),
         ("xfce4-terminal", &["-e"]),
@@ -197,18 +198,26 @@ fn pick_terminal() -> (&'static str, Vec<&'static str>) {
         ("kitty", &["--"]),
         ("xterm", &["-e"]),
     ];
-    let path = std::env::var_os("PATH").unwrap_or_default();
     for (cmd, args) in CANDIDATES {
-        for dir in std::env::split_paths(&path) {
-            if dir.join(cmd).is_file() {
-                return ((*cmd), args.to_vec());
+        for dir in std::env::split_paths(path) {
+            let candidate = dir.join(cmd);
+            if candidate.is_file() {
+                // The system alternative can point to Ptyxis, which uses -- instead of -e.
+                if *cmd == "x-terminal-emulator"
+                    && candidate
+                        .canonicalize()
+                        .is_ok_and(|resolved| resolved.file_name() == Some(OsStr::new("ptyxis")))
+                {
+                    return (cmd, PTYXIS_ARGS);
+                }
+                return (cmd, args);
             }
         }
     }
     // Last resort: `xterm -e <cmd>` will surface a clear "not found" error if
     // none of the candidates are installed, instead of silently launching a
     // headless TUI.
-    ("xterm", vec!["-e"])
+    ("xterm", &["-e"])
 }
 
 #[cfg(windows)]
@@ -568,6 +577,21 @@ mod tests {
         assert_ne!(cmd.get_program(), exe.as_os_str());
         let args: Vec<&OsStr> = cmd.get_args().collect();
         assert!(args.iter().any(|a| *a == exe.as_os_str()));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn ptyxis_system_alternative_uses_its_argument_separator() {
+        let directory = tempfile::tempdir().expect("terminal directory");
+        let ptyxis = directory.path().join("ptyxis");
+        std::fs::write(&ptyxis, "").expect("terminal executable");
+        std::os::unix::fs::symlink(ptyxis, directory.path().join("x-terminal-emulator"))
+            .expect("system terminal alternative");
+
+        let (program, args) = pick_terminal(directory.path().as_os_str());
+
+        assert_eq!(program, "x-terminal-emulator");
+        assert_eq!(args, ["--standalone", "--new-window", "--"]);
     }
 
     #[test]

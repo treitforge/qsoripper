@@ -81,49 +81,10 @@ QsoRipper uses ADIF **only at the edges** for QRZ API calls and file I/O. Intern
 ## Getting Started
 
 The repository selects Rust through `rust-toolchain.toml`.
-`global.json` sets .NET SDK 10.0.100 as the minimum and permits roll-forward.
+`global.json` requires .NET SDK 10.0.404 or later in the .NET 10 SDK series.
 
 ### Windows
 
-```
-# Windows
-winget install Rustlang.Rustup
-
-# Linux (Debian/Ubuntu)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-**.NET SDK 10** -- required for the .NET workspace under `src/dotnet/`, including the developer debug workbench and engine validation CLI:
-
-```
-# Windows
-winget install Microsoft.DotNet.SDK.10
-
-# Linux (Debian/Ubuntu)
-sudo apt install dotnet-sdk-10.0
-```
-
-The repository requires SDK `10.0.404` or a later .NET 10 SDK through `global.json`.
-This minimum includes the security update for the Native AOT compiler.
-To update an existing Windows installation, run:
-
-```powershell
-winget upgrade --id Microsoft.DotNet.SDK.10 --exact
-```
-
-**Node.js + npm** -- required for the repo-local Playwright tooling and for bootstrapping the local Terminalizer runtime used by terminal capture:
-
-```
-# Windows
-winget install OpenJS.NodeJS.LTS
-
-# Linux (Debian/Ubuntu)
-sudo apt install nodejs npm
-```
-
-Node 22 LTS is the safest default for local UI automation work. A newer globally installed Node is fine as long as `npm` is available. `capture-tui.ps1` bootstraps its own repo-local Node 22 runtime for Terminalizer.
-
-**PowerShell 7** -- required for the repo automation scripts under `scripts/`, including Avalonia and terminal capture:
 Install the tools in PowerShell.
 
 ```powershell
@@ -160,36 +121,53 @@ These commands were tested on x86-64. Omit `sudo` in a container where you run a
 
 ```sh
 sudo apt update
-sudo apt install --no-install-recommends ca-certificates curl build-essential protobuf-compiler libprotobuf-dev dotnet-sdk-10.0
+sudo apt install --no-install-recommends ca-certificates curl build-essential protobuf-compiler libprotobuf-dev
+sudo apt install --no-install-recommends libbrotli1 libgssapi-krb5-2 libicu78 libssl3t64 tzdata zlib1g-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
 . "$HOME/.cargo/env"
 ```
 
-From the repository root, build and test the workspaces directly.
+From the repository root, check `dotnet --version`. If your SDK does not meet the requirement, run the [Microsoft installer](https://learn.microsoft.com/en-us/dotnet/core/install/linux-scripted-manual).
 
 ```sh
-cargo build --manifest-path src/rust/Cargo.toml
-cargo test --manifest-path src/rust/Cargo.toml
-dotnet build src/dotnet/QsoRipper.slnx
-dotnet test src/dotnet/QsoRipper.slnx --no-build
+curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+bash /tmp/dotnet-install.sh --jsonfile global.json
+export DOTNET_ROOT="$HOME/.dotnet"
+export PATH="$DOTNET_ROOT:$PATH"
 ```
 
-Run the tests before you start the engines. The Rust FFI tests skip live checks when no engine is available.
-To run the live checks, first configure a station profile on the engine.
 Install [PowerShell 7](https://learn.microsoft.com/en-us/powershell/scripting/install/install-ubuntu) for the repository helpers.
-Run `pwsh -File tests/Run-EngineConformance.ps1` with both engine ports free to test both implementations.
-
-For the Avalonia desktop, install the X11 libraries and fonts.
+Install the compiler and audio libraries for the full build. Install the X11 libraries and fonts for Avalonia.
 
 ```sh
+sudo apt install --no-install-recommends clang pkg-config libasound2-dev
 sudo apt install --no-install-recommends libx11-6 libice6 libsm6 libfontconfig1 fonts-dejavu-core
 mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/qsoripper"
 ```
 
 The setup wizard needs this directory for the default logbook path.
-Use the [launch commands below](#direct-launch) for both engines and Avalonia.
+Use these commands from the repository root.
+
+```sh
+pwsh -File build.ps1
+pwsh -File launcher.ps1
+```
+
+Use `pwsh -File runall.ps1` to build and start both engines, Avalonia, DebugHost, and CW Scope.
+Use `-NoEngines` to keep your current engine and start the selected apps.
+Run `pwsh -File build-and-test.ps1` before you start the engines to run the build, quality checks, and tests.
+The Rust FFI tests need a configured station profile when you run them against a live engine.
 In a container without a display, install `xvfb` and `xauth`. Prefix the GUI command with `xvfb-run -a`.
-To build the optional CW decoder, install `pkg-config` and `libasound2-dev` before you run `pwsh -File build.ps1 cw-decoder`.
+
+Install the optional MinGW-w64 tools to include the x86-64 Win32 GUI in the Ubuntu build.
+
+```sh
+sudo apt install --no-install-recommends cmake make gcc-mingw-w64-x86-64-posix binutils-mingw-w64-x86-64
+pwsh -File build.ps1 win32
+```
+
+Both `build.ps1` and its `win32` command publish the executable to `artifacts/publish/qsoripper-win32/Release/` by default.
+Wine can open this executable. Use Windows or a Windows VM for the full Win32 build and tests.
 
 ### UI inspection and automation
 
@@ -215,32 +193,20 @@ See the [UI inspection guide](docs/development/ui-inspection.md).
 
 ### Interactive launcher
 
-On Windows, run the launcher from the repository root.
+Run the launcher from the repository root after you build the apps.
 
 ```powershell
-.\launcher.ps1
+pwsh -File launcher.ps1
 ```
 
-Or invoke cargo directly:
+Pass `-Rebuild` to publish the apps first. Pass `-Dev` to use Debug artifacts.
+On Ubuntu, the launcher opens the TUI in a desktop terminal. Install `xterm` if no supported terminal is available.
 
-```powershell
-cd src\rust
-cargo run -p qsoripper-launcher --release
-```
+Press `Space` to select engines and apps. Press `Enter` to start the selected items.
+Use the third column to bind each app to an engine. Press `S` to stop launcher-managed processes.
+Selections persist in `[launcher]` in `config.toml`.
 
-`qsoripper-launcher` is a fast-starting ratatui application.
-It lists the available engines and user interfaces.
-Rust uses port 50051, and .NET uses port 50052.
-Press `Space` to select an item.
-Use the third column to bind each user interface to an engine.
-Press `Enter` to start the selected items.
-
-Press `S` to stop launcher-managed processes.
-
-Selections persist below `[launcher]` in `config.toml`.
-On Windows, run `.\build.ps1` first to publish the apps.
-The PowerShell wrapper validates a sibling CatHub build on each start.
-It builds CatHub when the sibling executable is missing or incompatible.
+The PowerShell wrapper checks for a compatible CatHub executable. It can build CatHub from a sibling checkout.
 
 ### Local engine launcher
 

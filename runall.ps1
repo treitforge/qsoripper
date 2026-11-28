@@ -5,11 +5,10 @@
     artifacts/publish.
 
 .DESCRIPTION
-    1. Builds Rust + .NET + Win32 via build.ps1 (skip with -SkipBuild).
+    1. Builds the apps for the current platform (skip with -SkipBuild).
     2. Force-restarts the Rust engine (50051) and .NET engine (50052) using
        start-qsoripper.ps1 so the GUI's engine selector sees both.
-    3. Stops any running DebugHost / Avalonia GUI / CW Scope and relaunches
-       them from artifacts/publish so they reflect the latest build.
+    3. Restarts the selected published applications from artifacts/publish.
     4. Opens http://localhost:5082 in the default browser for the DebugHost.
 
     Every binary is launched from the published artifact path (no `dotnet run`
@@ -22,7 +21,7 @@
     Skip build.ps1 — just relaunch from existing artifacts.
 
 .PARAMETER NoEngines
-    Do not start the Rust / .NET engine servers.
+    Keep the current engines and skip engine startup.
 
 .PARAMETER NoDebugHost
     Do not start the DebugHost web app.
@@ -58,53 +57,34 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+& (Join-Path $PSScriptRoot 'scripts' 'Initialize-DotnetRoot.ps1')
+
 function Write-Step([string]$Message) {
     Write-Host "`n=== $Message ===" -ForegroundColor Cyan
 }
 
-function Stop-ProcessByName([string]$Name) {
-    $procs = Get-Process -Name $Name -ErrorAction SilentlyContinue
-    if (-not $procs) { return }
-    foreach ($p in $procs) {
+function Stop-PublishedApplications([string]$PublishRoot, [string[]]$Components) {
+    if (-not $Components) { return }
+
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    $directories = @($Components | ForEach-Object { (Join-Path $PublishRoot $_) + $separator })
+    $stopped = $false
+    # Linux process names can be truncated. Use the apphost path to identify the published copy.
+    foreach ($p in (Get-Process -ErrorAction SilentlyContinue)) {
+        $path = $p.Path
+        if (-not $path) { continue }
+        if (-not ($directories | Where-Object { $path.StartsWith($_, $comparison) })) { continue }
         try {
             Write-Host "  Stopping $($p.ProcessName) (PID $($p.Id))" -ForegroundColor Yellow
             Stop-Process -Id $p.Id -Force -ErrorAction Stop
+            $stopped = $true
         } catch {
             Write-Host "  Warning: failed to stop PID $($p.Id): $_" -ForegroundColor Yellow
         }
     }
-    # Give the OS a moment to release file/socket handles.
-    Start-Sleep -Milliseconds 500
-}
-
-# Names of every process that can hold a lock on a published artifact under
-# artifacts/publish/. Killing these before invoking build.ps1 prevents
-# Copy-Item failures of the form "the process cannot access the file ...
-# because it is being used by another process" when an earlier runall left
-# binaries running.
-$ManagedProcessNames = @(
-    'qsoripper-server',
-    'QsoRipper.Engine.DotNet',
-    'QsoRipper.DebugHost',
-    'QsoRipper.Gui',
-    'QsoRipper.Cli',
-    'CwDecoderGui',
-    'qsoripper-tui',
-    'qsoripper-stress-tui',
-    'qsoripper-win32'
-)
-
-function Stop-AllManagedProcesses {
-    # Try to stop the engines politely first so they release their gRPC
-    # listening sockets and SQLite handles, then force-kill anything that
-    # is still alive (GUIs, leftover children, etc.).
-    try {
-        & "$PSScriptRoot\stop-qsoripper.ps1" -All | Out-Null
-    } catch {
-        Write-Host "  stop-qsoripper.ps1 reported: $_" -ForegroundColor Yellow
-    }
-    foreach ($name in $ManagedProcessNames) {
-        Stop-ProcessByName $name
+    if ($stopped) {
+        Start-Sleep -Milliseconds 500
     }
 }
 
@@ -128,9 +108,6 @@ function Start-Detached([string]$Path, [string[]]$Arguments, [string]$WorkingDir
 # --- Resolve published artifact paths ----------------------------------------
 
 $publishRoot              = Join-Path $PSScriptRoot 'artifacts' 'publish'
-$serverExe                = Join-Path $publishRoot 'qsoripper-server'        | Join-Path -ChildPath $Configuration | Join-Path -ChildPath ($IsWindows ? 'qsoripper-server.exe' : 'qsoripper-server')
-$dotnetEngineDir          = Join-Path $publishRoot 'qsoripper-engine-dotnet' | Join-Path -ChildPath $Configuration
-$dotnetEngineExe          = Join-Path $dotnetEngineDir ($IsWindows ? 'QsoRipper.Engine.DotNet.exe' : 'QsoRipper.Engine.DotNet')
 $debugHostDir             = Join-Path $publishRoot 'qsoripper-debughost'     | Join-Path -ChildPath $Configuration
 $debugHostExe             = Join-Path $debugHostDir ($IsWindows ? 'QsoRipper.DebugHost.exe' : 'QsoRipper.DebugHost')
 $guiDir                   = Join-Path $publishRoot 'qsoripper-gui'           | Join-Path -ChildPath $Configuration
@@ -140,8 +117,15 @@ $cwScopeExe               = Join-Path $cwScopeDir ($IsWindows ? 'CwDecoderGui.ex
 
 # --- Step 0: stop anything that could lock published artifacts ---------------
 
-Write-Step 'Stopping any running QsoRipper processes (release artifact locks)'
-Stop-AllManagedProcesses
+$applicationsToRestart = @(
+    if (-not $NoDebugHost) { 'qsoripper-debughost' }
+    if (-not $NoGui) { 'qsoripper-gui' }
+    if (-not $NoCwScope) { 'cw-decoder-gui' }
+)
+if ($applicationsToRestart) {
+    Write-Step 'Stopping published apps selected for restart'
+    Stop-PublishedApplications -PublishRoot $publishRoot -Components $applicationsToRestart
+}
 
 # --- Step 1: build -----------------------------------------------------------
 
@@ -179,7 +163,6 @@ if (-not $NoEngines) {
 
 if (-not $NoDebugHost) {
     Write-Step 'Restarting DebugHost on http://localhost:5082'
-    Stop-ProcessByName 'QsoRipper.DebugHost'
     $null = Start-Detached -Path $debugHostExe -WorkingDirectory $debugHostDir -Arguments @('--urls', 'http://localhost:5082')
     Start-Sleep -Seconds 2
     try {
@@ -195,7 +178,6 @@ if (-not $NoDebugHost) {
 
 if (-not $NoGui) {
     Write-Step 'Restarting QsoRipper GUI'
-    Stop-ProcessByName 'QsoRipper.Gui'
     $null = Start-Detached -Path $guiExe -WorkingDirectory $guiDir
 } else {
     Write-Step 'Skipping main GUI (-NoGui)'
@@ -205,7 +187,6 @@ if (-not $NoGui) {
 
 if (-not $NoCwScope) {
     Write-Step 'Restarting CW Scope GUI'
-    Stop-ProcessByName 'CwDecoderGui'
 
     # Stale cw-decoder.exe trap: the CW Scope GUI shells out to the Rust
     # binary in experiments/cw-decoder/target/{release,debug}/. If a cargo

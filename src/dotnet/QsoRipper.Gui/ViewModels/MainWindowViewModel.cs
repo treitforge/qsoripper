@@ -371,6 +371,7 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
         try
         {
             var response = await _engine.SyncWithQrzAsync();
+            MarkEngineReachable();
 
             if (!string.IsNullOrEmpty(response.Error))
             {
@@ -385,12 +386,18 @@ internal sealed partial class MainWindowViewModel : ObservableObject, IDisposabl
                 ? $"Sync needs review: {conflicts} conflict{(conflicts == 1 ? string.Empty : "s")} (\u2191{up} \u2193{down})"
                 : $"Synced: \u2191{up} \u2193{down}";
             await RecentQsos.RefreshAsync();
-            MarkEngineReachable();
         }
-        catch (Grpc.Core.RpcException ex)
+        catch (RpcException ex)
         {
             SyncStatusText = $"Sync failed: {ex.Status.Detail}";
-            MarkEngineUnreachable();
+            if (ex.StatusCode is StatusCode.Unavailable or StatusCode.DeadlineExceeded)
+            {
+                MarkEngineUnreachable();
+            }
+            else
+            {
+                MarkEngineReachable();
+            }
         }
         finally
         {

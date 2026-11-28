@@ -317,6 +317,10 @@ function Build-Rust {
 }
 
 function Find-VcVarsAll {
+    if (-not $IsWindows -or -not ${env:ProgramFiles(x86)}) {
+        return $null
+    }
+
     $vswherePath = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio' 'Installer' 'vswhere.exe'
     if (-not (Test-Path $vswherePath)) {
         return $null
@@ -346,7 +350,7 @@ function Find-VcVarsAll {
 }
 
 function Build-Dotnet {
-    # Native AOT requires the MSVC linker. ILCompiler's findvcvarsall.bat uses
+    # Native AOT on Windows requires the MSVC linker. ILCompiler's findvcvarsall.bat uses
     # vswhere to locate it, but some VS installations (e.g., VS 18 BuildTools)
     # may not register VC.Tools correctly. When that happens, set up the VC
     # environment manually and pass IlcUseEnvironmentalTools=true.
@@ -432,10 +436,50 @@ function Build-Dotnet {
     }
 }
 
+function Build-Win32Cross {
+    foreach ($tool in @('cmake', 'make', 'x86_64-w64-mingw32-gcc', 'x86_64-w64-mingw32-windres')) {
+        if (Get-Command $tool -CommandType Application -ErrorAction SilentlyContinue) {
+            continue
+        }
+        Write-Step 'Win32 GUI'
+        Write-Host "Skipping Win32 cross-build: $tool is missing. Install CMake, Make, and the x86-64 MinGW-w64 toolchain." -ForegroundColor Yellow
+        return
+    }
+
+    $buildDir = Join-Path $PSScriptRoot 'artifacts' 'build' 'qsoripper-win32-mingw' $Configuration
+    Invoke-Build "Configuring Win32 cross-build ($Configuration)" cmake @(
+        '-S', $Win32SourceDir, '-B', $buildDir,
+        '-G', 'Unix Makefiles',
+        '-DCMAKE_SYSTEM_NAME=Windows',
+        '-DCMAKE_SYSTEM_PROCESSOR=x86_64',
+        '-DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc',
+        '-DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres',
+        "-DCMAKE_BUILD_TYPE=$Configuration"
+    )
+    Invoke-Build "Cross-building qsoripper-win32 ($Configuration)" cmake @(
+        '--build', $buildDir, '--target', 'qsoripper-win32'
+    )
+
+    $null = New-Item -ItemType Directory -Force -Path $Win32PublishDir
+    Copy-PublishArtifact -Path (Join-Path $buildDir 'qsoripper-win32.exe') -DestinationDir $Win32PublishDir
+    Write-Host "  -> $Win32PublishDir"
+}
+
 function Build-Win32 {
     if (-not (Test-Path $Win32Source)) {
         Write-Step 'Win32 GUI'
         Write-Host 'Win32 source not found, skipping.' -ForegroundColor Yellow
+        return
+    }
+
+    if ($IsLinux) {
+        Build-Win32Cross
+        return
+    }
+
+    if (-not $IsWindows) {
+        Write-Step 'Win32 GUI'
+        Write-Host 'Skipping Win32. Use Windows or the Linux MinGW-w64 toolchain.' -ForegroundColor Yellow
         return
     }
 
@@ -783,7 +827,7 @@ Commands:
   rust          Build Rust only (copies qsoripper-tui and qsoripper-stress-tui binaries to artifacts)
   cw-decoder    Build the experiments/cw-decoder Rust binaries (cw-decoder + eval) only
   dotnet        Publish the CLI and GUI apps only
-  win32         Build the Win32 C GUI app only
+  win32         Build the Win32 C GUI only (MSVC on Windows, x86-64 MinGW-w64 on Linux)
   cathub-probe-native
                 Build the native C++ CatHub frequency probe only
   check-rust    Rust quality: fmt, clippy, test + coverage threshold, buf lint, cargo deny

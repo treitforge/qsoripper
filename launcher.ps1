@@ -15,8 +15,8 @@
     outdated engines, which surfaces as the GUI showing stale config (for
     example an empty CAT Hub settings page after editing config.toml).
 
-    Pass -Dev to use the unoptimized debug binary. Arguments after '--' are
-    forwarded to the launcher.
+    Pass -Dev to use the debug binary and Debug artifacts. Additional arguments
+    are forwarded to the launcher.
 
 .EXAMPLE
     .\launcher.ps1
@@ -25,7 +25,7 @@
     .\launcher.ps1 -Rebuild
 
 .EXAMPLE
-    .\launcher.ps1 -- --help
+    pwsh -File launcher.ps1 --help
 #>
 
 [CmdletBinding()]
@@ -37,6 +37,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+& (Join-Path $PSScriptRoot 'scripts' 'Initialize-DotnetRoot.ps1')
 
 $rustRoot = Join-Path $PSScriptRoot 'src\rust'
 if (-not (Test-Path -LiteralPath $rustRoot)) {
@@ -122,9 +124,12 @@ if (-not (Test-Path -LiteralPath $exePath)) {
 $catHubProfile = if ($Dev) { 'Debug' } else { 'Release' }
 $null = Initialize-CatHubExecutable -QsoRipperRoot $PSScriptRoot -Profile $catHubProfile
 
-if ($Forward) {
-    & $exePath @Forward
-} else {
-    & $exePath
+$launcherArguments = @()
+if ($Dev) {
+    $launcherArguments += '--debug'
 }
+if ($Forward) {
+    $launcherArguments += $Forward
+}
+& $exePath @launcherArguments
 exit $LASTEXITCODE

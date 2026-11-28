@@ -54,6 +54,22 @@ public sealed class MainWindowViewModelEngineReachabilityTests
         Assert.False(viewModel.IsEngineUnreachable);
     }
 
+    [Theory]
+    [InlineData(StatusCode.FailedPrecondition, false)]
+    [InlineData(StatusCode.Unavailable, true)]
+    [InlineData(StatusCode.DeadlineExceeded, true)]
+    public async Task SyncNowDistinguishesQrzErrorsFromConnectionFailures(StatusCode code, bool unreachable)
+    {
+        const string detail = "Sync could not complete.";
+        var engine = new FakeEngineClient { SyncFailure = new Status(code, detail) };
+        using var viewModel = new MainWindowViewModel(engine);
+
+        await viewModel.SyncNowCommand.ExecuteAsync(null);
+
+        Assert.Equal(unreachable, viewModel.IsEngineUnreachable);
+        Assert.Equal($"Sync failed: {detail}", viewModel.SyncStatusText);
+    }
+
     private sealed class FakeEngineClient : IEngineClient
     {
         public GetSetupStatusResponse SetupStatus { get; init; } = new()
@@ -66,6 +82,7 @@ public sealed class MainWindowViewModelEngineReachabilityTests
         };
 
         public bool FailWithRpcException { get; init; }
+        public Status? SyncFailure { get; init; }
 
         public Task<GetSetupWizardStateResponse> GetWizardStateAsync(CancellationToken ct = default) =>
             Task.FromResult(new GetSetupWizardStateResponse { Status = SetupStatus.Status ?? new SetupStatus() });
@@ -106,7 +123,9 @@ public sealed class MainWindowViewModelEngineReachabilityTests
             throw new NotImplementedException();
 
         public Task<SyncWithQrzResponse> SyncWithQrzAsync(CancellationToken ct = default) =>
-            Task.FromResult(new SyncWithQrzResponse());
+            SyncFailure is { } failure
+                ? Task.FromException<SyncWithQrzResponse>(new RpcException(failure))
+                : Task.FromResult(new SyncWithQrzResponse());
 
         public Task<GetSyncStatusResponse> GetSyncStatusAsync(CancellationToken ct = default)
         {

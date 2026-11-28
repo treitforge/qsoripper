@@ -524,9 +524,9 @@ mod tests {
     #[test]
     fn acknowledge_qso_start_updates_form_time() {
         let mut app = App::new("http://localhost:50051".to_string());
-        app.form.time = "00:00".to_string();
+        app.form.time.clear();
         app.acknowledge_qso_start();
-        assert_ne!(app.form.time, "00:00");
+        assert!(!app.form.time.is_empty());
     }
 
     #[test]

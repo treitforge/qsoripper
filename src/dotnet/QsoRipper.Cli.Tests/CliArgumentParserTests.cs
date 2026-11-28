@@ -186,6 +186,17 @@ public class CliArgumentParserTests
         Assert.Null(arguments.Callsign);
     }
 
+    [Fact]
+    public void Parse_cabrillo_import_keeps_file_and_options()
+    {
+        var arguments = CliArgumentParser.Parse(
+            ["import-cabrillo", "contest.log", "--digital-mode", "FT8", "--no-enrich"]);
+
+        Assert.Equal("import-cabrillo", arguments.Command);
+        Assert.Equal("contest.log", arguments.Callsign);
+        Assert.Equal(["--digital-mode", "FT8", "--no-enrich"], arguments.RemainingArgs);
+    }
+
     [Theory]
     [InlineData("http://localhost:50051", true)]
     [InlineData("https://example.com:7443", true)]

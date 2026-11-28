@@ -628,6 +628,7 @@ dotnet run --project QsoRipper.Cli -- status
 dotnet run --project QsoRipper.Cli -- --endpoint http://localhost:50051 status
 dotnet run --project QsoRipper.Cli -- enrich --preview
 dotnet run --project QsoRipper.Cli -- enrich --apply --after 2026-08-01T00:00:00Z
+dotnet run --project QsoRipper.Cli -- import-cabrillo contest.log
 ```
 
 On Windows, publish and run the Native AOT CLI.
@@ -639,6 +640,9 @@ On Windows, publish and run the Native AOT CLI.
 
 The CLI generates client stubs from the shared proto contracts during the build.
 It includes commands for status, lookup, local logbook operations, and QSO enrichment backfill.
+The `import-cabrillo` command converts Cabrillo QSOs to ADIF and imports them.
+It then fills missing QSO data through QRZ XML lookup.
+Use `--digital-mode <mode>` when a Cabrillo file uses the generic `DG` mode.
 
 ## Documentation
 

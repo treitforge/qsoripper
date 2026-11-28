@@ -50,9 +50,11 @@ jobs:
           github_token: ${{ github.token }}
           setup_only: true
 
-      - name: Install Rust quality tooling
-        run: |
-          cargo install cargo-deny --version 0.20.2 --locked
+      - name: Install prebuilt cargo-deny
+        uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
 
       - name: Verify key developer tools
         run: |

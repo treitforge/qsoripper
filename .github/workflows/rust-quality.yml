@@ -58,13 +58,11 @@ jobs:
           github_token: ${{ github.token }}
           setup_only: true
 
-      - name: Install cargo-deny
-        run: |
-          cargo install cargo-deny --version 0.20.2 --locked
-
-      - name: Install cargo-llvm-cov
-        run: |
-          cargo install cargo-llvm-cov --locked
+      - name: Install prebuilt Rust quality tools
+        uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
+        with:
+          tool: cargo-deny@0.20.2,cargo-llvm-cov@0.9.2
+          fallback: none
 
       - name: Check formatting
         run: cargo fmt --manifest-path src/rust/Cargo.toml --all -- --check
